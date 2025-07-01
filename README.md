@@ -2,6 +2,8 @@
 
 My personal terminal setup for blazing-fast productivity ⚡
 
+
+## 📖 Overview This repository contains my Zsh configuration, Neovim setup (LazyVim), and various terminal utilities that I use daily. The goal is to provide a clean, efficient, and highly customizable terminal experience.
 ---
 
 ## 📸 Terminal Preview
