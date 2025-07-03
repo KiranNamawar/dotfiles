@@ -24,22 +24,6 @@ return {
     end,
   },
 
-  -- Markdown Preview in browser (optional)
-  {
-    "iamcco/markdown-preview.nvim",
-    ft = { "markdown" },
-    build = "cd app && yarn install",
-    init = function()
-      vim.g.mkdp_auto_start = 0
-      vim.g.mkdp_auto_close = 1
-      vim.g.mkdp_refresh_slow = 0
-      vim.g.mkdp_theme = "dark"
-    end,
-    keys = {
-      { "<leader>mp", "<cmd>MarkdownPreview<CR>", desc = "Markdown Browser Preview" },
-    },
-  },
-
   -- Terminal-based preview with Glow
   {
     "ellisonleao/glow.nvim",

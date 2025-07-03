@@ -45,3 +45,11 @@ export FZF_CTRL_T_OPTS="--preview 'bat --style=numbers --color=always {} | head 
 # === Path Priority Order ===
 export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
 
+export FZF_DEFAULT_COMMAND='fd --type f'
+export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+
+# === Tmux Powerline ===
+export TMUX_POWERLINE_DIR="$HOME/.tmux-powerline"
+export TMUX_POWERLINE_CONFIG_FILE="$TMUX_POWERLINE_DIR/config/default.sh"
+export TMUX_POWERLINE_SEGMENTS_DIR="$TMUX_POWERLINE_DIR/segments"
+

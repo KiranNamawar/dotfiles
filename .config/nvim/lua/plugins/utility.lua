@@ -76,21 +76,6 @@ return {
     end,
   },
 
-  -- Markdown preview in browser
-  {
-    "iamcco/markdown-preview.nvim",
-    ft = { "markdown" },
-    build = "cd app && npm install",
-    config = function()
-      vim.g.mkdp_auto_start = 0
-      vim.g.mkdp_auto_close = 1
-      vim.g.mkdp_refresh_slow = 0
-      vim.g.mkdp_command_for_global = 0
-      vim.g.mkdp_browser = "" -- use system default
-      vim.g.mkdp_theme = "dark"
-    end,
-  },
-
   -- Filetype icons (optional, for prettier lists)
   {
     "nvim-tree/nvim-web-devicons",

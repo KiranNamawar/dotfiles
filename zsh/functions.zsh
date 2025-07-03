@@ -96,3 +96,25 @@ reload_zsh() {
   source ~/.zshrc && echo "✅ ZSH reloaded!"
 }
 
+# --- Search command history with fzf ---
+histfzf() {
+  local selected_cmd
+
+  selected_cmd=$(atuin search --format=tsv --limit 10000 \
+    | awk -F'\t' '{print $2 "\t" $1 "\t" $3}' \
+    | fzf --reverse --tiebreak=index \
+          --prompt="History > " \
+          --preview='echo {} | cut -f1 | bat --style=plain --color=always' \
+          --preview-window=down:3:wrap \
+          --header="⏱ Command | 📅 Timestamp | 📁 Directory" \
+          --bind "enter:accept"
+  )
+
+  if [ -n "$selected_cmd" ]; then
+    BUFFER=$(echo "$selected_cmd" | cut -f1)
+    zle accept-line
+  fi
+}
+zle -N histfzf
+bindkey '^r' histfzf  # Ctrl+R binds to histfzf
+

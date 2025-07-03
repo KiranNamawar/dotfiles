@@ -81,3 +81,9 @@ alias :q="exit"
 alias cl="clear"
 alias path="echo $PATH | tr ':' '\n'"
 
+# === Atuin (History Manager) ===
+alias hist="atuin search"
+alias histd="atuin search --cwd \$PWD"
+
+# === Powerline for Tmux ===
+alias powerline="~/.tmux-powerline/main.tmux"

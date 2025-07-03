@@ -2,20 +2,18 @@
 -- These options are loaded before LazyVim starts
 
 -- Enable Windows clipboard integration when running in WSL
-if vim.fn.has("wsl") == 1 then
-  vim.g.clipboard = {
-    name = "win32yank",
-    copy = {
-      ["+"] = "win32yank.exe -i --crlf",
-      ["*"] = "win32yank.exe -i --crlf",
-    },
-    paste = {
-      ["+"] = "win32yank.exe -o --lf",
-      ["*"] = "win32yank.exe -o --lf",
-    },
-    cache_enabled = true,
-  }
-end
+vim.g.clipboard = {
+  name = "WSLClipboard",
+  copy = {
+    ["+"] = "clip.exe",
+    ["*"] = "clip.exe",
+  },
+  paste = {
+    ["+"] = "powershell.exe -NoProfile -Command Get-Clipboard",
+    ["*"] = "powershell.exe -NoProfile -Command Get-Clipboard",
+  },
+  cache_enabled = true,
+}
 
 -- Customize Copilot suggestion color
 vim.api.nvim_set_hl(0, "CopilotSuggestion", {

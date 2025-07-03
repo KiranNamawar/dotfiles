@@ -1,5 +1,7 @@
 # ~/.zshrc
 
+typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet
+
 # === Oh My Zsh Config ===
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="powerlevel10k/powerlevel10k"
@@ -11,6 +13,11 @@ export PATH="/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
+
+if [[ -t 1 && -n "$PS1" ]]; then
+  fastfetch
+fi
+
 
 # Plugins
 plugins=(
@@ -38,4 +45,21 @@ eval "$(zoxide init zsh)"
 [[ -f ~/dotfiles/zsh/aliases.zsh ]] && source ~/dotfiles/zsh/aliases.zsh
 [[ -f ~/dotfiles/zsh/exports.zsh ]] && source ~/dotfiles/zsh/exports.zsh
 [[ -f ~/dotfiles/zsh/functions.zsh ]] && source ~/dotfiles/zsh/functions.zsh
+
+
+# bun completions
+[ -s "/home/kiran/.bun/_bun" ] && source "/home/kiran/.bun/_bun"
+
+# pnpm
+export PNPM_HOME="/home/kiran/.local/share/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+# pnpm end
+
+. "$HOME/.atuin/bin/env"
+
+eval "$(atuin init zsh)"
+
 
