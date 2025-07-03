@@ -122,10 +122,10 @@ return {
       local lspconfig = require("lspconfig")
       local capabilities = vim.lsp.protocol.make_client_capabilities()
 
-      -- If cmp_nvim_lsp is installed, enhance capabilities
-      local ok_cmp, cmp_lsp = pcall(require, "cmp_nvim_lsp")
+      -- If blink.cmp is installed, enhance capabilities
+      local ok_cmp, blink_cmp = pcall(require, "blink.cmp")
       if ok_cmp then
-        capabilities = cmp_lsp.default_capabilities(capabilities)
+        capabilities = blink_cmp.get_lsp_capabilities(capabilities)
       end
 
       local function on_attach(client, bufnr)

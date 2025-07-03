@@ -1,31 +1,136 @@
 # ~/dotfiles/zsh/functions.zsh
+# Smart Functions for Ultimate Terminal Experience
+# Last updated: July 3, 2025
 
-# --- Create and move into a directory ---
-mkcd() {
-  mkdir -p "$1" && cd "$1"
+# === Welcome Message Function ===
+# This function displays the welcome message when opening a new shell
+display_welcome_message() {
+  echo -e "\n$(date '+%A, %B %d, %Y %H:%M')"
+  echo -e "\n💡 $(shuf -n 1 $DOTFILES_DIR/resources/quotes.txt 2>/dev/null || echo 'Welcome to your ultimate terminal!')"
+  fastfetch
 }
 
-# --- Extract various archive formats ---
+# === File System Operations ===
+
+# Create and move into a directory
+mkcd() {
+  mkdir -p "$1" && cd "$1" && echo "📁 Created and moved to $PWD"
+}
+
+# Extract archives with progress and intelligent handling
 extract() {
   if [[ -f "$1" ]]; then
+    echo "🔄 Extracting $(basename $1)..."
     case "$1" in
-      *.tar.bz2)   tar xjf "$1"     ;;
-      *.tar.gz)    tar xzf "$1"     ;;
-      *.tar.xz)    tar xJf "$1"     ;;
+      *.tar.bz2)   pv "$1" | tar xjf -     ;;
+      *.tar.gz)    pv "$1" | tar xzf -     ;;
+      *.tar.xz)    pv "$1" | tar xJf -     ;;
       *.lzma)      unlzma "$1"      ;;
       *.bz2)       bunzip2 "$1"     ;;
       *.rar)       unrar x "$1"     ;;
       *.gz)        gunzip "$1"      ;;
-      *.tar)       tar xf "$1"      ;;
-      *.tbz2)      tar xjf "$1"     ;;
-      *.tgz)       tar xzf "$1"     ;;
+      *.tar)       pv "$1" | tar xf -      ;;
+      *.tbz2)      pv "$1" | tar xjf -     ;;
+      *.tgz)       pv "$1" | tar xzf -     ;;
       *.zip)       unzip "$1"       ;;
       *.Z)         uncompress "$1"  ;;
       *.7z)        7z x "$1"        ;;
-      *)           echo "❌ Unknown archive format: $1" ;;
+      *)           echo "❌ Unknown archive format: $1" && return 1 ;;
     esac
+    echo "✅ Extraction complete!"
   else
     echo "❌ File not found: $1"
+    return 1
+  fi
+}
+
+# Smart file finder with preview
+ff() {
+  local result=$(fzf --preview 'bat --color=always {}' --height 80% --layout reverse)
+  if [[ -n "$result" ]]; then
+    $EDITOR "$result"
+  fi
+}
+
+# === Project Management ===
+
+# Initialize a new project with smart templates
+project_init() {
+  if [[ -z "$1" ]]; then
+    echo "❌ Please provide a project name"
+    return 1
+  fi
+  
+  local project_name="$1"
+  local project_type="${2:-general}"
+  
+  echo "🚀 Creating $project_type project: $project_name"
+  mkcd "$project_name"
+  
+  case "$project_type" in
+    node|nodejs)
+      echo "📦 Setting up Node.js project..."
+      npm init -y
+      echo "node_modules/" > .gitignore
+      mkdir -p src test
+      ;;
+    python)
+      echo "🐍 Setting up Python project..."
+      python -m venv .venv
+      echo ".venv/" > .gitignore
+      echo "__pycache__/" >> .gitignore
+      mkdir -p src tests
+      ;;
+    go|golang)
+      echo "🚀 Setting up Go project..."
+      go mod init "$project_name"
+      mkdir -p cmd pkg internal
+      ;;
+    *)
+      echo "📝 Setting up general project structure..."
+      mkdir -p src docs assets
+      ;;
+  esac
+  
+  # Initialize git
+  git init
+  echo "✅ Project initialized successfully!"
+  
+  # Auto-open in editor if wanted
+  if [[ "$3" == "--open" ]]; then
+    $EDITOR .
+  fi
+}
+
+# Git-aware project status dashboard
+project_status() {
+  local dir="${1:-.}"
+  echo "📊 Project Status for $(basename $(realpath $dir))"
+  echo "----------------------------------------"
+  
+  # Git status if available
+  if [[ -d "$dir/.git" ]]; then
+    echo "🔄 Git Status:"
+    git -C "$dir" status -s
+    echo ""
+    echo "📈 Recent Activity:"
+    git -C "$dir" log --oneline -5
+    echo ""
+  fi
+  
+  # Files overview
+  echo "📁 File Structure:"
+  ls -la "$dir" | grep -v "^total"
+  
+  # Project-specific information
+  if [[ -f "$dir/package.json" ]]; then
+    echo ""
+    echo "📦 Node.js Project"
+    echo "Dependencies: $(jq '.dependencies | length' "$dir/package.json") regular, $(jq '.devDependencies | length' "$dir/package.json") dev"
+  elif [[ -f "$dir/requirements.txt" ]]; then
+    echo ""
+    echo "🐍 Python Project"
+    echo "Dependencies: $(wc -l < "$dir/requirements.txt")"
   fi
 }
 
@@ -89,11 +194,6 @@ lgit() {
 fuzzyedit() {
   local file
   file=$(fzf --preview 'bat --style=numbers --color=always {} | head -100') && nvim "$file"
-}
-
-# --- Reload zsh config ---
-reload_zsh() {
-  source ~/.zshrc && echo "✅ ZSH reloaded!"
 }
 
 # --- Search command history with fzf ---

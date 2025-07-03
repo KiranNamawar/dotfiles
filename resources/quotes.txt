@@ -1,0 +1,20 @@
+"The best way to predict the future is to invent it." - Alan Kay
+"Simple things should be simple, complex things should be possible." - Alan Kay
+"Perfection is achieved not when there is nothing more to add, but when there is nothing left to take away." - Antoine de Saint-Exupery
+"Make it work, make it right, make it fast." - Kent Beck
+"The most powerful tool we have as developers is automation." - Scott Hanselman
+"Code is like humor. When you have to explain it, it's bad." - Cory House
+"Any fool can write code that a computer can understand. Good programmers write code that humans can understand." - Martin Fowler
+"Programs must be written for people to read, and only incidentally for machines to execute." - Harold Abelson
+"Simplicity is the ultimate sophistication." - Leonardo da Vinci
+"A primary cause of complexity is that software vendors uncritically adopt almost any feature that users want." - Niklaus Wirth
+"The most important property of a program is whether it accomplishes the intention of its user." - C.A.R. Hoare
+"The art of programming is the skill of controlling complexity." - Marijn Haverbeke
+"First, solve the problem. Then, write the code." - John Johnson
+"The function of good software is to make the complex appear to be simple." - Grady Booch
+"The quieter you become, the more you can hear." - Ram Dass
+"The more you know, the more you realize you know nothing." - Socrates
+"Your time is limited, don't waste it living someone else's life." - Steve Jobs
+"The terminal is where elegance meets power." - Anonymous
+"The best error message is the one that never shows up." - Thomas Fuchs
+"Good design is obvious. Great design is transparent." - Joe Sparano

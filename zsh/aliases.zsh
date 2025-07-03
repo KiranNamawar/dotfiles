@@ -1,6 +1,7 @@
 # ~/dotfiles/zsh/aliases.zsh
+# Smart Aliases for an Irresistible Terminal Experience
 
-# === Navigation ===
+# === Navigation - Smart & Context-Aware ===
 alias ..="cd .."
 alias ...="cd ../.."
 alias ....="cd ../../.."
@@ -9,31 +10,48 @@ alias dot="cd ~/dotfiles"
 alias sz="source ~/.zshrc"
 alias reload="exec zsh"
 
-# === Listing ===
-alias l="lsd -l"
-alias ll="lsd -la"
-alias la="lsd -A"
-alias lt="lsd --tree"
-alias tree="lsd --tree"
+# Smart directory jumping with project awareness
+alias proj="cd ~/projects && ls -la"
+alias work="cd ~/work && ls -la"
+alias notes="cd ~/notes && ls -la"
 
-# === Editor Shortcuts ===
+# === Enhanced Listing with Icons and Colors ===
+alias l="lsd -l --group-dirs first"
+alias ll="lsd -la --group-dirs first"
+alias la="lsd -A --group-dirs first"
+alias lt="lsd --tree --depth=2"
+alias ltree="lsd --tree"
+alias lsize="lsd -la --total-size --sizesort" # List by size
+
+# === Editor Shortcuts with Context ===
 alias v="nvim"
 alias ez="nvim ~/.zshrc"
-alias ep="nvim ~/.p10k.zsh"
 alias ev="nvim ~/dotfiles/zsh"
+alias ep="nvim ~/.config/starship.toml"
+alias edot="nvim ~/dotfiles/PLAN.md" # Edit dotfiles plan
+alias etmux="nvim ~/.tmux.conf"
 
-# === Git Shortcuts ===
+# === Git Workflow Accelerators ===
 alias gs="git status"
-alias ga="git add ."
+alias ga="git add"
+alias gaa="git add ."
 alias gc="git commit -m"
 alias gca="git commit --amend"
 alias gp="git push"
 alias gpo="git push origin"
-alias gl="git log --oneline --graph --decorate"
+alias gl="git pull"
+alias glog="git log --graph --pretty='%Cred%h%Creset -%C(auto)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset'"
+alias gsummary="git status -s && git diff --stat"
 alias gb="git branch"
 alias gco="git checkout"
 alias gd="git diff"
 alias gcl="git clone"
+
+# === System Management ===
+alias mem="btop --memory-tab" # Memory view in btop
+alias cpu="btop --cpu-tab"    # CPU view in btop
+alias diskspace="duf"         # Better df alternative
+alias usage="dust -r"         # Disk usage with dust
 
 # === Package Managers ===
 alias n="npm"
@@ -55,7 +73,6 @@ alias pacq="pacman -Qdt"
 
 # === Clipboard & Output ===
 alias copy="xclip -selection clipboard"
-alias hist="history | fzf"
 alias ports="sudo lsof -i -P -n | grep LISTEN"
 
 # === Replacements ===
@@ -85,5 +102,3 @@ alias path="echo $PATH | tr ':' '\n'"
 alias hist="atuin search"
 alias histd="atuin search --cwd \$PWD"
 
-# === Powerline for Tmux ===
-alias powerline="~/.tmux-powerline/main.tmux"
