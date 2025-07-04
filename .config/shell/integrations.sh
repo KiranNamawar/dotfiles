@@ -46,7 +46,50 @@ if command -v tmux &> /dev/null; then
     fi
   }
 fi
+#!/bin/bash
+# Shell integrations for modern developer tools
 
+# Zoxide initialization (better cd)
+if command -v zoxide &> /dev/null; then
+  eval "$(zoxide init bash)"
+fi
+
+# Atuin initialization (better history)
+if command -v atuin &> /dev/null; then
+  eval "$(atuin init bash)"
+fi
+
+# FZF key bindings and completion
+if command -v fzf &> /dev/null; then
+  # Set up fzf key bindings and fuzzy completion
+  eval "$(fzf --bash)"
+
+  # Custom FZF functions
+  export FZF_DEFAULT_OPTS="
+    --color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8
+    --color=fg:#cdd6f4,header:#f38ba8,info:#cba6ac,pointer:#f5e0dc
+    --color=marker:#f5e0dc,fg+:#cdd6f4,prompt:#cba6ac,hl+:#f38ba8
+    --height=40% --layout=reverse --border --info=inline"
+
+  export FZF_DEFAULT_COMMAND="fd --type f --hidden --follow --exclude .git"
+  export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+  export FZF_ALT_C_COMMAND="fd --type d --hidden --follow --exclude .git"
+fi
+
+# Direnv hook for automatic environment loading
+if command -v direnv &> /dev/null; then
+  eval "$(direnv hook bash)"
+fi
+
+# Github CLI completion
+if command -v gh &> /dev/null; then
+  eval "$(gh completion -s bash)"
+fi
+
+# Docker completion
+if command -v docker &> /dev/null; then
+  source /usr/share/bash-completion/completions/docker 2>/dev/null
+fi
 # Docker integration
 if command -v docker &> /dev/null; then
   # Quick container management

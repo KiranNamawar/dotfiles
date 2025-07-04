@@ -1,180 +1,364 @@
-"$schema" = 'https://starship.rs/config-schema.json'
+# 🚀 Enhanced Starship Configuration
+# Optimized for modern development workflows with WSL support
+# Last updated: July 4, 2025
 
+# Main prompt format with enhanced modules
 format = """
-[](color_orange)\
+[](#9A348E)\
 $os\
 $username\
-[](bg:color_yellow fg:color_orange)\
+[](bg:#DA627D fg:#9A348E)\
 $directory\
-[](fg:color_yellow bg:color_aqua)\
+[](fg:#DA627D bg:#FCA17D)\
 $git_branch\
 $git_status\
-[](fg:color_aqua bg:color_blue)\
+$git_metrics\
+[](fg:#FCA17D bg:#86BBD8)\
 $c\
 $cpp\
+$python\
+$nodejs\
 $rust\
 $golang\
-$nodejs\
-$php\
 $java\
 $kotlin\
+$scala\
+$php\
+$ruby\
+$elixir\
+$elm\
 $haskell\
-$python\
-[](fg:color_blue bg:color_bg3)\
+$julia\
+$nim\
+$gradle\
+$dotnet\
+$lua\
+$zig\
+$dart\
+$swift\
+[](fg:#86BBD8 bg:#06969A)\
 $docker_context\
-$conda\
-$pixi\
-[](fg:color_bg3 bg:color_bg1)\
-$time\
-[ ](fg:color_bg1)\
-$line_break$character"""
+$kubernetes\
+$aws\
+$gcloud\
+$azure\
+$terraform\
+[](fg:#06969A bg:#33658A)\
+$memory_usage\
+$cmd_duration\
+[](fg:#33658A)\
+$line_break\
+$character\
+"""
 
-palette = 'gruvbox_dark'
+# Right prompt for additional info
+right_format = """
+$shell\
+$status\
+$jobs\
+"""
 
-[palettes.gruvbox_dark]
-color_fg0 = '#fbf1c7'
-color_bg1 = '#3c3836'
-color_bg3 = '#665c54'
-color_blue = '#458588'
-color_aqua = '#689d6a'
-color_green = '#98971a'
-color_orange = '#d65d0e'
-color_purple = '#b16286'
-color_red = '#cc241d'
-color_yellow = '#d79921'
+# Clean prompt start
+add_newline = false
 
-[os]
-disabled = false
-style = "bg:color_orange fg:color_fg0"
+# Continuation prompt
+continuation_prompt = "▶▶ "
 
-[os.symbols]
-Windows = "󰍲"
-Ubuntu = "󰕈"
-SUSE = ""
-Raspbian = "󰐿"
-Mint = "󰣭"
-Macos = "󰀵"
-Manjaro = ""
-Linux = "󰌽"
-Gentoo = "󰣨"
-Fedora = "󰣛"
-Alpine = ""
-Amazon = ""
-Android = ""
-Arch = "󰣇"
-Artix = "󰣇"
-EndeavourOS = ""
-CentOS = ""
-Debian = "󰣚"
-Redhat = "󱄛"
-RedHatEnterprise = "󱄛"
-Pop = ""
+# ===============================================================================
+# CORE MODULES
+# ===============================================================================
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+vimcmd_symbol = "[❮](bold blue)"
 
 [username]
 show_always = true
-style_user = "bg:color_orange fg:color_fg0"
-style_root = "bg:color_orange fg:color_fg0"
-format = '[ $user ]($style)'
+style_user = "bg:#9A348E bold"
+style_root = "bg:#9A348E bold red"
+format = '[$user ]($style)'
+disabled = false
+
+[os]
+style = "bg:#9A348E"
+disabled = false
+symbols.Windows = "󰍲 "
+symbols.Ubuntu = " "
+symbols.Linux = "󰌽 "
+symbols.Arch = " "
+symbols.Debian = " "
+symbols.Fedora = " "
+symbols.Alpine = " "
+symbols.Macos = "󰀵 "
 
 [directory]
-style = "fg:color_fg0 bg:color_yellow"
+style = "bg:#DA627D bold"
 format = "[ $path ]($style)"
 truncation_length = 3
 truncation_symbol = "…/"
+read_only = "󰌾"
+home_symbol = "󰋜"
 
 [directory.substitutions]
-"Documents" = "󰈙 "
-"Downloads" = " "
-"Music" = "󰝚 "
-"Pictures" = " "
-"Developer" = "󰲋 "
+"Documents" = "󰈙 Docs"
+"Downloads" = "󰇚 Downloads"
+"Music" = "󰝚 Music"
+"Pictures" = "󰉏 Pics"
+"Videos" = "󰕧 Videos"
+"Desktop" = "󰇄 Desktop"
+"projects" = "󰲋 Projects"
+"work" = "󱔟 Work"
+"dotfiles" = "󰙵 Dotfiles"
+"repositories" = "󰊢 Repos"
+"notes" = "󰠮 Notes"
+
+# ===============================================================================
+# GIT CONFIGURATION
+# ===============================================================================
 
 [git_branch]
-symbol = ""
-style = "bg:color_aqua"
-format = '[[ $symbol $branch ](fg:color_fg0 bg:color_aqua)]($style)'
+symbol = "󰘬 "
+style = "bg:#FCA17D bold"
+format = '[ $symbol$branch ]($style)'
 
 [git_status]
-style = "bg:color_aqua"
-format = '[[($all_status$ahead_behind )](fg:color_fg0 bg:color_aqua)]($style)'
+style = "bg:#FCA17D"
+format = '[$all_status$ahead_behind ]($style)'
+conflicted = "󰞇 "
+ahead = "󰜷 "
+behind = "󰜮 "
+diverged = "󰹺 "
+up_to_date = "󰚰 "
+untracked = "󰋖 "
+stashed = "󰏗 "
+modified = "󰏫 "
+staged = "󰐗 "
+renamed = "󰑕 "
+deleted = "󰍶 "
 
-[nodejs]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+[git_metrics]
+added_style = "bg:#FCA17D green"
+deleted_style = "bg:#FCA17D red"
+format = '([+$added ]($added_style)[-$deleted]($deleted_style))'
+disabled = false
+
+[git_commit]
+commit_hash_length = 7
+style = "bg:#FCA17D"
+format = '[ $hash$tag ]($style)'
+
+# ===============================================================================
+# PROGRAMMING LANGUAGES
+# ===============================================================================
 
 [c]
 symbol = " "
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
 
 [cpp]
 symbol = " "
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[rust]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[golang]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[php]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[java]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[kotlin]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-[haskell]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
 
 [python]
-symbol = ""
-style = "bg:color_blue"
-format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+symbol = "󰌠 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version)( $virtualenv) ]($style)'
+pyenv_version_name = true
+detect_extensions = ["py"]
+detect_files = ["requirements.txt", "pyproject.toml", "Pipfile"]
+
+[nodejs]
+symbol = "󰎙 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+detect_files = ["package.json", ".nvmrc", "tsconfig.json"]
+detect_extensions = ["js", "mjs", "cjs", "ts", "tsx"]
+
+# TypeScript detection is handled by nodejs module
+# [typescript] module doesn't exist in Starship
+
+[rust]
+symbol = "󱘗 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[golang]
+symbol = "󰟓 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[java]
+symbol = "󰬷 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[kotlin]
+symbol = "󱈙 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[scala]
+symbol = " "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[php]
+symbol = "󰌟 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[ruby]
+symbol = "󰴭 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[elixir]
+symbol = " "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[lua]
+symbol = "󰢱 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[zig]
+symbol = "󰰦 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[dart]
+symbol = " "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[swift]
+symbol = "󰛥 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+[dotnet]
+symbol = "󰪮 "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+# ===============================================================================
+# BUILD TOOLS
+# ===============================================================================
+
+[gradle]
+symbol = " "
+style = "bg:#86BBD8"
+format = '[ $symbol($version) ]($style)'
+
+# Maven is not a standalone module - it's detected by gradle or other build tools
+# [maven] module doesn't exist in Starship
+
+# ===============================================================================
+# CONTAINERIZATION & CLOUD
+# ===============================================================================
 
 [docker_context]
-symbol = ""
-style = "bg:color_bg3"
-format = '[[ $symbol( $context) ](fg:#83a598 bg:color_bg3)]($style)'
+symbol = "󰡨 "
+style = "bg:#06969A"
+format = '[ $symbol$context ]($style)'
 
-[conda]
-style = "bg:color_bg3"
-format = '[[ $symbol( $environment) ](fg:#83a598 bg:color_bg3)]($style)'
+[kubernetes]
+symbol = "󱃾 "
+style = "bg:#06969A"
+format = '[ $symbol$context( $namespace) ]($style)'
+disabled = false
 
-[pixi]
-style = "bg:color_bg3"
-format = '[[ $symbol( $version)( $environment) ](fg:color_fg0 bg:color_bg3)]($style)'
+[aws]
+symbol = "󰸏 "
+style = "bg:#06969A"
+format = '[ $symbol($profile)( $region) ]($style)'
+disabled = false
+
+[gcloud]
+symbol = "󱇶 "
+style = "bg:#06969A"
+format = '[ $symbol($project) ]($style)'
+disabled = false
+
+[azure]
+symbol = "󰠅 "
+style = "bg:#06969A"
+format = '[ $symbol($subscription) ]($style)'
+disabled = false
+
+[terraform]
+symbol = "󱁢 "
+style = "bg:#06969A"
+format = '[ $symbol$workspace ]($style)'
+disabled = false
+
+# ===============================================================================
+# SYSTEM MONITORING
+# ===============================================================================
+
+[battery]
+full_symbol = "󰁹 "
+charging_symbol = "󰂄 "
+discharging_symbol = "󰂃 "
+unknown_symbol = "󰁽 "
+empty_symbol = "󰂎 "
+format = '[ $symbol$percentage ]($style)'
+
+[[battery.display]]
+threshold = 15
+style = "red"
+
+[[battery.display]]
+threshold = 50
+style = "yellow"
+
+[[battery.display]]
+threshold = 100
+style = "bg:#33658A"
+
+[memory_usage]
+symbol = "󰍛 "
+style = "bg:#33658A"
+format = '[ $symbol${ram}( | ${swap}) ]($style)'
+threshold = 70
+disabled = false
+
+[cmd_duration]
+min_time = 2000
+style = "bg:#33658A"
+format = '[ 󰔛 $duration ]($style)'
 
 [time]
 disabled = false
 time_format = "%R"
-style = "bg:color_bg1"
-format = '[[  $time ](fg:color_fg0 bg:color_bg1)]($style)'
+style = "bg:#33658A bold"
+format = '[ 󰥔 $time ]($style)'
 
-[line_break]
+# ===============================================================================
+# SHELL & STATUS
+# ===============================================================================
+
+[shell]
+bash_indicator = "󱆃 "
+zsh_indicator = "󰰶 "
+fish_indicator = "󰈺 "
+powershell_indicator = "󰨊 "
+disabled = false
+style = "bold cyan"
+
+[status]
+style = "bold red"
+symbol = "󰅙 "
+success_symbol = "󰸞 "
+format = '[$symbol$status]($style)'
 disabled = false
 
-[character]
-disabled = false
-success_symbol = '[](bold fg:color_green)'
-error_symbol = '[](bold fg:color_red)'
-vimcmd_symbol = '[](bold fg:color_green)'
-vimcmd_replace_one_symbol = '[](bold fg:color_purple)'
-vimcmd_replace_symbol = '[](bold fg:color_purple)'
-vimcmd_visual_symbol = '[](bold fg:color_yellow)'
+[jobs]
+symbol = "󰜎 "
+style = "bold blue"
+number_threshold = 1
+format = '[$symbol$number]($style)'

@@ -1,0 +1,47 @@
+# Ripgrep configuration file
+# ~/.config/ripgrep/config
+
+# Always search hidden files
+--hidden
+
+# Follow symbolic links
+--follow
+
+# Use smart case (case insensitive unless uppercase letters are used)
+--smart-case
+
+# Show line numbers
+--line-number
+
+# Show column numbers
+--column
+
+# Add colors
+--colors=line:fg:yellow
+--colors=line:style:bold
+--colors=path:fg:green
+--colors=path:style:bold
+--colors=match:fg:black
+--colors=match:bg:yellow
+--colors=match:style:nobold
+
+# Exclude common directories and files
+--glob=!.git/*
+--glob=!node_modules/*
+--glob=!.next/*
+--glob=!dist/*
+--glob=!build/*
+--glob=!target/*
+--glob=!.vscode/*
+--glob=!.idea/*
+--glob=!*.min.js
+--glob=!*.min.css
+--glob=!package-lock.json
+--glob=!yarn.lock
+--glob=!Cargo.lock
+
+# Set max columns to prevent very long lines
+--max-columns=150
+
+# Use multiple threads
+--threads=4

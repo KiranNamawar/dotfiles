@@ -18,3 +18,23 @@
 "The terminal is where elegance meets power." - Anonymous
 "The best error message is the one that never shows up." - Thomas Fuchs
 "Good design is obvious. Great design is transparent." - Joe Sparano
+Code is poetry written in logic.
+The best error message is the one that never shows up.
+Simplicity is the ultimate sophistication.
+First, solve the problem. Then, write the code.
+Clean code always looks like it was written by someone who cares.
+The most important property of a program is whether it accomplishes the intention of its user.
+Programming is not about typing, it's about thinking.
+Any fool can write code that a computer can understand. Good programmers write code that humans can understand.
+The best way to get a project done faster is to start sooner.
+Code never lies, comments sometimes do.
+Programming is the art of telling another human what one wants the computer to do.
+If debugging is the process of removing bugs, then programming must be the process of putting them in.
+The most effective debugging tool is still careful thought, coupled with judiciously placed print statements.
+Good code is its own best documentation.
+Programs must be written for people to read, and only incidentally for machines to execute.
+The cheapest, fastest, and most reliable components are those that aren't there.
+Deleted code is debugged code.
+There are only two hard things in Computer Science: cache invalidation and naming things.
+The function of good software is to make the complex appear to be simple.
+Walking on water and developing software from a specification are easy if both are frozen.
