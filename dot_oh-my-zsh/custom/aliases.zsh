@@ -231,6 +231,10 @@ alias targz='tar -xzf'
 alias tarbz='tar -xjf'
 alias unzip='unzip -q'
 
+# Utilities
+alias v='nvim'
+alias vi='nvim'
+alias cl='clear'
 
 # =============================================================================
 # MODERN TOOL SPECIFIC ALIASES
