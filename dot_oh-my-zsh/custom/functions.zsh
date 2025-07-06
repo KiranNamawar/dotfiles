@@ -174,24 +174,13 @@ function q() {
     # Check if we are inside Zellij
     if [[ -n "$ZELLIJ_SESSION_ID" ]]; then
         echo "Exiting Zellij session..."
-        zellij quit --force # Force quits the entire Zellij session
-        sleep 0.5 # Give it a moment to detach
+        # This will exit Zellij and return you to the underlying WSL shell
+        zellij quit --force
+        sleep 0.5 # Give it a moment to detach or close
     fi
 
-    # Attempt to kill the parent process (the terminal emulator)
-    # This might vary depending on your terminal and how it's launched.
-    # It sends a SIGTERM (graceful termination) to the parent.
-    # If the parent is the terminal, it should close.
-    # If it's another shell, it will exit that shell.
-
-    # Find the parent process ID (PPID)
-    local ppid=$(ps -o ppid= -p $$)
-
-    if [[ -n "$ppid" ]]; then
-        echo "Attempting to close the terminal by killing parent process $ppid..."
-        kill "$ppid"
-    else
-        echo "Could not determine parent process ID. Falling back to 'exit'."
-        exit
-    fi
+    # Now, exit the current WSL shell.
+    # Windows Terminal, with the correct setting, will then close the tab.
+    echo "Exiting WSL shell. Windows Terminal should close this tab."
+    exit
 }
