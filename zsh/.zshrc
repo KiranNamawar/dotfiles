@@ -69,12 +69,20 @@ _comp_options+=(globdots)
 # Would you like to use another custom folder than $ZSH/custom?
 # ZSH_CUSTOM=/path/to/new-custom-folder
 
+# --- Tmux Auto-Start Configuration ---
+# Automatically start tmux
+ZSH_TMUX_AUTOSTART=true
+# Auto-connect to the session named "main" (or create it)
+ZSH_TMUX_AUTOCONNECT=true
+# Name the default session
+ZSH_TMUX_DEFAULT_SESSION_NAME="main"
+
 # Which plugins would you like to load?
 # Standard plugins can be found in $ZSH/plugins/
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git zsh-autosuggestions zsh-syntax-highlighting fzf fzf-tab)
+plugins=(git zsh-autosuggestions zsh-syntax-highlighting fzf fzf-tab tmux)
 
 source $ZSH/oh-my-zsh.sh
 
