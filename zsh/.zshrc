@@ -117,6 +117,8 @@ alias ll='lsd -l --group-directories-first'
 alias la='lsd -la --group-directories-first'
 alias tree='lsd --tree'
 
+alias sqlite='litecli'
+
 
 # fnm
 FNM_PATH="/home/kiran/.local/share/fnm"
@@ -180,3 +182,10 @@ zstyle ':fzf-tab:complete:*:*' fzf-preview '
     bat --color=always --style=numbers --line-range=:500 $realpath
   fi'
 
+
+# bun completions
+[ -s "/home/kiran/.bun/_bun" ] && source "/home/kiran/.bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
