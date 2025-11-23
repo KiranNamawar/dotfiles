@@ -8,31 +8,30 @@ if [ -f ~/.oci/.secrets ]; then
     source ~/.oci/.secrets
 fi
 
-# ------------------------------------------
-# 2. PANTRY (Oracle Autonomous DB 26ai)
-# ------------------------------------------
-pantry() {
-  # Auto-encode password to handle special characters safely
-  local PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote_plus('$PANTRY_PASSWORD'))")
-  
-  # Connect via Mongosh
-  # Added "$@" at the end to allow passing arguments (like --eval)
-  mongosh "mongodb://ADMIN:$PASS@G3EEDDBE928C059-PANTRY.adb.ap-mumbai-1.oraclecloudapps.com:27017/ADMIN?authMechanism=PLAIN&authSource=\$external&ssl=true&retryWrites=false&loadBalanced=true" "$@"
-}
 
 # ------------------------------------------
-# 3. JAM (Managed MySQL HeatWave)
+# 2. JAM (Managed MySQL HeatWave)
 # ------------------------------------------
 # --- JAM (MySQL) ---
 # Connected via Tailscale Mesh (Direct Private IP)
+# jam() {
+#   if [ -z "$JAM_PASS" ]; then echo "Set \$JAM_PASS first"; return 1; fi
+#   MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$@"
+# }
 jam() {
   if [ -z "$JAM_PASS" ]; then echo "Set \$JAM_PASS first"; return 1; fi
-  MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$@"
+  
+  # If $1 is passed (like 'ecommerce_db'), use it. Otherwise, default to empty.
+  local DB_TARGET="$1"
+  
+  # If we provided a DB name, shift arguments so extra flags work
+  if [ -n "$DB_TARGET" ]; then shift; fi 
+
+  MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$DB_TARGET" "$@"
 }
 
-
 # ------------------------------------------
-# 4. BASKET (Object Storage S3)
+# 3. BASKET (Object Storage S3)
 # ------------------------------------------
 basket() {
   if [ -z "$NS" ]; then export NS=$(oci os ns get | jq -r '.data'); fi
@@ -83,4 +82,52 @@ basket() {
       echo "Commands: ls [prefix], push <file>, pull <file>, rm [-r] <name>, url <file>"
       ;;
   esac
+}
+
+
+# ------------------------------------------
+# 4. PANTRY (SQL Interface - Default)
+# ------------------------------------------
+# Access: Wallet (mTLS) via SQLcl
+pantry() {
+  # Ensure environment is ready
+  [ -z "$TNS_ADMIN" ] && export TNS_ADMIN="$HOME/.oci/wallet"
+  [ -z "$PANTRY_PASSWORD" ] && [ -f ~/.oci/.secrets ] && source ~/.oci/.secrets
+
+  if [ -n "$1" ]; then
+     # Use CSV or JSON if requested, otherwise default to pretty ANSI
+     local FORMAT="ansiconsole"
+     if [[ "$1" == "--json" ]]; then FORMAT="json"; shift; fi
+     if [[ "$1" == "--csv" ]]; then FORMAT="csv"; shift; fi
+    
+    sql -L /nolog <<EOF
+connect ADMIN/"$PANTRY_PASSWORD"@pantry_high
+set sqlformat ansiconsole;
+$1
+EXIT;
+EOF
+  else
+     # Interactive Mode
+     sql ADMIN/"$PANTRY_PASSWORD"@pantry_high
+  fi
+}
+
+
+
+# ------------------------------------------
+# 5. PANTRY-SH (Mongo Interface)
+# ------------------------------------------
+# Access: Public Endpoint via Mongosh
+pantrysh() {
+  # Check variables (Hostname is in secrets)
+  if [ -z "$PANTRY_PASSWORD" ] || [ -z "$PANTRY_HOST" ]; then
+    echo "Error: Credentials not set. Source ~/.oci/.secrets"
+    return 1
+  fi
+
+  # Encode password for URL safety
+  local PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote_plus('$PANTRY_PASSWORD'))")
+  
+  # Connect
+  mongosh "mongodb://ADMIN:$PASS@$PANTRY_HOST/ADMIN?authMechanism=PLAIN&authSource=\$external&ssl=true&retryWrites=false&loadBalanced=true" "$@"
 }
