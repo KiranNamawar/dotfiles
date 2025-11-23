@@ -151,10 +151,11 @@ site() {
 
       echo "✅ Live at: https://objectstorage.ap-mumbai-1.oraclecloud.com/n/$NS/b/$BUCKET/o/${URL_SUFFIX}index.html"
       ;;
-    ls)
-      # 1. jq: Converts size to B/KB/MB
-      # 2. jq: Formats date to remove T and Z
-      # 3. column: Aligns based on TABS (-s $'\t') not spaces
+   ls)
+      # 1. Header
+      echo -e "SIZE\tMODIFIED\tNAME"
+      
+      # 2. List -> jq (With Safety Check) -> Loop -> Column
       oci os object list --namespace $NS --bucket-name $BUCKET --output json \
       | jq -r '
         def human_size: 
@@ -162,13 +163,15 @@ site() {
           elif . < 1048576 then "\(. / 1024 | round) KB"
           else "\(. / 1048576 * 10 | round / 10) MB"
           end;
-          
-        ["SIZE", "MODIFIED", "NAME"],
-        (.data[] | [
-          (.size | human_size),
-          (.["time-modified"] | sub("\\..*";"") | sub("T";" ")),
-          .name
-        ]) | @tsv' \
+        
+        # THE FIX: (.data // []) defaults to empty array if null, preventing crash
+        (.data // [])[] | [ (.size | human_size), .["time-modified"], .name ] | @tsv' \
+      | while IFS=$'\t' read -r size raw_time name; do
+          if [ -n "$raw_time" ]; then
+             local_time=$(date -d "$raw_time" "+%Y-%m-%d %H:%M")
+             echo -e "${size}\t${local_time}\t${name}"
+          fi
+      done \
       | column -t -s $'\t'
       ;;
     rm)
