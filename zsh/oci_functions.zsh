@@ -121,12 +121,12 @@ site() {
   case "$CMD" in
     deploy)
       # Usage: site deploy <local_folder> [remote_name]
-      local SITE_DIR="$ARG1"
+      local SITE_DIR="${ARG1%/}"
       local REMOTE_NAME="$ARG2"
 
       if [ -z "$SITE_DIR" ]; then echo "Usage: site deploy <folder> [project_name]"; return 1; fi
       
-      # 1. Build the base command arguments in an array
+      # 1. Build Arguments
       local -a UPLOAD_OPTS
       UPLOAD_OPTS=(
         --namespace "$NS"
@@ -138,8 +138,6 @@ site() {
       )
 
       local URL_SUFFIX=""
-      
-      # 2. Add the prefix if a project name is provided
       if [ -n "$REMOTE_NAME" ]; then
          UPLOAD_OPTS+=(--object-prefix "${REMOTE_NAME}/")
          URL_SUFFIX="${REMOTE_NAME}/"
@@ -148,23 +146,38 @@ site() {
          echo "🚀 Deploying '$SITE_DIR' -> Root (Main Site)"
       fi
       
-      # 3. Execute (Using "${UPLOAD_OPTS[@]}" preserves the arguments correctly)
+      # 2. Execute Bulk Upload
       oci os object bulk-upload "${UPLOAD_OPTS[@]}"
-        
+
       echo "✅ Live at: https://objectstorage.ap-mumbai-1.oraclecloud.com/n/$NS/b/$BUCKET/o/${URL_SUFFIX}index.html"
       ;;
-      
     ls)
-      oci os object list --namespace $NS --bucket-name $BUCKET \
-          --output table --query "data[*].{Name:name, Type:\"content-type\"}"
+      # 1. jq: Converts size to B/KB/MB
+      # 2. jq: Formats date to remove T and Z
+      # 3. column: Aligns based on TABS (-s $'\t') not spaces
+      oci os object list --namespace $NS --bucket-name $BUCKET --output json \
+      | jq -r '
+        def human_size: 
+          if . < 1024 then "\(.) B"
+          elif . < 1048576 then "\(. / 1024 | round) KB"
+          else "\(. / 1048576 * 10 | round / 10) MB"
+          end;
+          
+        ["SIZE", "MODIFIED", "NAME"],
+        (.data[] | [
+          (.size | human_size),
+          (.["time-modified"] | sub("\\..*";"") | sub("T";" ")),
+          .name
+        ]) | @tsv' \
+      | column -t -s $'\t'
       ;;
-      
     rm)
        if [ -z "$ARG1" ]; then echo "Usage: site rm <file> OR site rm -r <folder>"; return 1; fi
+       
        if [[ "$ARG1" == "-r" ]]; then
-          echo "🔥 Nuking folder '$2' from website..."
-          # Note: If deleting a project, ensure you include the trailing slash, e.g., 'my-app/'
-          oci os object bulk-delete --namespace $NS --bucket-name $BUCKET --prefix "$2" --force
+          if [ -z "$ARG2" ]; then echo "Usage: site rm -r <folder_name>"; return 1; fi
+          echo "🔥 Nuking folder '$ARG2' from website..."
+          oci os object bulk-delete --namespace $NS --bucket-name $BUCKET --prefix "$ARG2" --force
        else
           oci os object delete --namespace $NS --bucket-name $BUCKET --name "$ARG1" --force
        fi
@@ -180,8 +193,6 @@ site() {
       ;;
   esac
 }
-
-
 
 # ------------------------------------------
 # 5. PANTRY (SQL Interface - Default)

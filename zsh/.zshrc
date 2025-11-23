@@ -92,7 +92,6 @@ source $ZSH/oh-my-zsh.sh
 if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
     source ~/.dotfiles/zsh/oci_functions.zsh
 fi
-
 # export MANPATH="/usr/local/man:$MANPATH"
 
 # You may need to manually set your language environment
@@ -210,3 +209,5 @@ zstyle ':fzf-tab:complete:*:*' fzf-preview '
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
+
+export PATH="$HOME/.local/bin:$PATH"
