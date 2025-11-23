@@ -75,8 +75,32 @@ basket() {
       oci os object get --namespace $NS --bucket-name $BUCKET --name "$ARG1" --file "$(basename "$ARG1")"
       ;;
     url)
-      if [ -z "$ARG1" ]; then echo "Usage: basket url <remote_file>"; return 1; fi
-      echo "https://objectstorage.ap-mumbai-1.oraclecloud.com/n/$NS/b/$BUCKET/o/$ARG1"
+      if [ -z "$ARG1" ]; then echo "Usage: basket url <file>"; return 1; fi
+      
+      echo "🔗 Generating Magic Link for '$ARG1'..."
+      
+      # Calculate expiry (Works on Linux/GNU and MacOS/BSD)
+      # Sets expiry to 24 hours from now
+      if date --version >/dev/null 2>&1; then
+          # Linux (GNU Date)
+          local EXPIRY=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)
+      else
+          # Mac (BSD Date)
+          local EXPIRY=$(date -u -v+1d +%Y-%m-%dT%H:%M:%SZ)
+      fi
+
+      # Generate the Pre-Authenticated Request
+      local PAR_PATH=$(oci os preauth-request create \
+         --namespace $NS --bucket-name $BUCKET \
+         --name "share_$(date +%s)" \
+         --object-name "$ARG1" \
+         --access-type ObjectRead \
+         --time-expires "$EXPIRY" \
+         --query "data.\"access-uri\"" --output raw)
+      
+      # Clean up output (sometimes contains quotes) and print
+      # Note: PAR_PATH comes with a leading slash
+      echo "https://objectstorage.ap-mumbai-1.oraclecloud.com${PAR_PATH}"
       ;;
     *)
       echo "Commands: ls [prefix], push <file>, pull <file>, rm [-r] <name>, url <file>"
@@ -84,9 +108,83 @@ basket() {
   esac
 }
 
+# ------------------------------------------
+# 4. SITE (Public Web Hosting)
+# ------------------------------------------
+site() {
+  if [ -z "$NS" ]; then export NS=$(oci os ns get --output json | jq -r '.data'); fi
+  local CMD=$1
+  local ARG1=$2
+  local ARG2=$3
+  local BUCKET="website"
+
+  case "$CMD" in
+    deploy)
+      # Usage: site deploy <local_folder> [remote_name]
+      local SITE_DIR="$ARG1"
+      local REMOTE_NAME="$ARG2"
+
+      if [ -z "$SITE_DIR" ]; then echo "Usage: site deploy <folder> [project_name]"; return 1; fi
+      
+      # 1. Build the base command arguments in an array
+      local -a UPLOAD_OPTS
+      UPLOAD_OPTS=(
+        --namespace "$NS"
+        --bucket-name "$BUCKET"
+        --src-dir "$SITE_DIR"
+        --overwrite
+        --content-type auto
+        --verify-checksum
+      )
+
+      local URL_SUFFIX=""
+      
+      # 2. Add the prefix if a project name is provided
+      if [ -n "$REMOTE_NAME" ]; then
+         UPLOAD_OPTS+=(--object-prefix "${REMOTE_NAME}/")
+         URL_SUFFIX="${REMOTE_NAME}/"
+         echo "🚀 Deploying '$SITE_DIR' -> '.../$REMOTE_NAME/'"
+      else
+         echo "🚀 Deploying '$SITE_DIR' -> Root (Main Site)"
+      fi
+      
+      # 3. Execute (Using "${UPLOAD_OPTS[@]}" preserves the arguments correctly)
+      oci os object bulk-upload "${UPLOAD_OPTS[@]}"
+        
+      echo "✅ Live at: https://objectstorage.ap-mumbai-1.oraclecloud.com/n/$NS/b/$BUCKET/o/${URL_SUFFIX}index.html"
+      ;;
+      
+    ls)
+      oci os object list --namespace $NS --bucket-name $BUCKET \
+          --output table --query "data[*].{Name:name, Type:\"content-type\"}"
+      ;;
+      
+    rm)
+       if [ -z "$ARG1" ]; then echo "Usage: site rm <file> OR site rm -r <folder>"; return 1; fi
+       if [[ "$ARG1" == "-r" ]]; then
+          echo "🔥 Nuking folder '$2' from website..."
+          # Note: If deleting a project, ensure you include the trailing slash, e.g., 'my-app/'
+          oci os object bulk-delete --namespace $NS --bucket-name $BUCKET --prefix "$2" --force
+       else
+          oci os object delete --namespace $NS --bucket-name $BUCKET --name "$ARG1" --force
+       fi
+       ;;
+       
+    url)
+      if [ -z "$ARG1" ]; then echo "Usage: site url <file_path>"; return 1; fi
+      echo "https://objectstorage.ap-mumbai-1.oraclecloud.com/n/$NS/b/$BUCKET/o/$ARG1"
+      ;;
+      
+    *)
+      echo "Commands: deploy <folder> [name], ls, rm, url"
+      ;;
+  esac
+}
+
+
 
 # ------------------------------------------
-# 4. PANTRY (SQL Interface - Default)
+# 5. PANTRY (SQL Interface - Default)
 # ------------------------------------------
 # Access: Wallet (mTLS) via SQLcl
 pantry() {
@@ -115,7 +213,7 @@ EOF
 
 
 # ------------------------------------------
-# 5. PANTRY-SH (Mongo Interface)
+# 6. PANTRY-SH (Mongo Interface)
 # ------------------------------------------
 # Access: Public Endpoint via Mongosh
 pantrysh() {
