@@ -88,6 +88,11 @@ source $ZSH/oh-my-zsh.sh
 
 # User configuration
 
+# --- Load Cloud Utilities ---
+if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
+    source ~/.dotfiles/zsh/oci_functions.zsh
+fi
+
 # export MANPATH="/usr/local/man:$MANPATH"
 
 # You may need to manually set your language environment
@@ -140,9 +145,16 @@ eval "$(starship init zsh)"
 
 # atuin
 export ATUIN_NOBIND="true"
-bindkey '^[[A' atuin-up-search
-bindkey '^[OA' atuin-up-search
 eval "$(atuin init zsh)"
+bindkey '^r' atuin-search
+
+stty -ixon
+# Now bind it
+bindkey '^s' fzf-history-widget
+
+# (Keep your Up Arrow as default Zsh history)
+bindkey '^[[A' up-line-or-search
+bindkey '^[OA' up-line-or-search
 
 # zellij auto startup
 # eval "$(zellij setup --generate-auto-start zsh)"
@@ -197,3 +209,4 @@ zstyle ':fzf-tab:complete:*:*' fzf-preview '
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+
