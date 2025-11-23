@@ -23,19 +23,13 @@ pantry() {
 # ------------------------------------------
 # 3. JAM (Managed MySQL HeatWave)
 # ------------------------------------------
-# Connects via Router Jump Host
+# --- JAM (MySQL) ---
+# Connected via Tailscale Mesh (Direct Private IP)
 jam() {
-  # -t forces a pseudo-terminal for interactive MySQL
-  local REMOTE_CMD="ssh -t router 'bash -ic jam'"
-  
-  if [[ -n "$TMUX" ]]; then
-    # If inside Tmux, open in new window
-    tmux new-window -n "jam" "$REMOTE_CMD"
-  else
-    # Otherwise run in current shell
-    eval "$REMOTE_CMD"
-  fi
+  if [ -z "$JAM_PASS" ]; then echo "Set \$JAM_PASS first"; return 1; fi
+  MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$@"
 }
+
 
 # ------------------------------------------
 # 4. BASKET (Object Storage S3)
