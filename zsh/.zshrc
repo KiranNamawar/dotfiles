@@ -4,6 +4,7 @@
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
 
+export PATH="$HOME/.local/bin:$PATH"
 # Force Zsh to show hidden files (dotfiles) in autocomplete
 _comp_options+=(globdots)
 
@@ -210,4 +211,3 @@ export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
 
-export PATH="$HOME/.local/bin:$PATH"
