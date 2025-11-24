@@ -1,5 +1,8 @@
 "$schema" = 'https://starship.rs/config-schema.json'
 
+# Increase timeout for cloud drives (default is usually 30ms)
+scan_timeout = 1000
+
 [aws]
 symbol = " "
 

@@ -1,245 +1,208 @@
 # ==========================================
-#  OCI CLOUD UTILITIES (Tamatar Infrastructure)
+#  TAMATAR CLOUD INFRASTRUCTURE (Fedora)
 # ==========================================
 
-# 1. Load Secrets (Safe Password Handling)
-# Ensure this file exports PANTRY_PASSWORD="..."
-if [ -f ~/.oci/.secrets ]; then
-    source ~/.oci/.secrets
-fi
+# --- 0. GLOBAL CONFIGURATION ---
+# Cache Namespace/Region to speed up terminal launch
+# (Run 'oci os ns get' once manually if this slows down shell startup)
+[ -z "$OCI_NS" ] && export OCI_NS=$(oci os ns get --query data --raw-output 2>/dev/null)
+export OCI_REGION="ap-mumbai-1"
 
-
-# ------------------------------------------
-# 2. JAM (Managed MySQL HeatWave)
-# ------------------------------------------
-# --- JAM (MySQL) ---
-# Connected via Tailscale Mesh (Direct Private IP)
-# jam() {
-#   if [ -z "$JAM_PASS" ]; then echo "Set \$JAM_PASS first"; return 1; fi
-#   MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$@"
-# }
-jam() {
-  if [ -z "$JAM_PASS" ]; then echo "Set \$JAM_PASS first"; return 1; fi
-  
-  # If $1 is passed (like 'ecommerce_db'), use it. Otherwise, default to empty.
-  local DB_TARGET="$1"
-  
-  # If we provided a DB name, shift arguments so extra flags work
-  if [ -n "$DB_TARGET" ]; then shift; fi 
-
-  MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$DB_TARGET" "$@"
+# Helper: Copy to Clipboard (Wayland/X11/Mac safe)
+_copy_to_clip() {
+  if command -v wl-copy &> /dev/null; then echo -n "$1" | wl-copy
+  elif command -v xclip &> /dev/null; then echo -n "$1" | xclip -selection clipboard
+  elif command -v pbcopy &> /dev/null; then echo -n "$1" | pbcopy
+  fi
 }
 
 # ------------------------------------------
-# 3. BASKET (Object Storage S3)
+# 1. BASKET (Private Storage - S3)
 # ------------------------------------------
+# Uses Rclone for transfer, OCI CLI for generating temporary links (PARs)
 basket() {
-  if [ -z "$NS" ]; then export NS=$(oci os ns get | jq -r '.data'); fi
   local CMD=$1
-  local ARG1=$2
-  local ARG2=$3
-  local BUCKET="basket"
+  local REMOTE="oracle:basket"
 
   case "$CMD" in
     ls)
-      oci os object list --namespace $NS --bucket-name $BUCKET \
-          --prefix "$ARG1" --output table \
-          --query "data[*].{Name:name, Size:size, Time:\"time-created\"}"
+      # List files with sizes (Fast)
+      echo "📂 Listing Basket..."
+      rclone lsl "$REMOTE"
       ;;
+    
     push)
-      if [ -z "$ARG1" ]; then echo "Usage: basket push <file> [remote_name]"; return 1; fi
-      local REMOTE_NAME="${ARG2:-$(basename "$ARG1")}"
-      oci os object put --namespace $NS --bucket-name $BUCKET \
-          --file "$ARG1" --name "$REMOTE_NAME" --force
+      # Upload file/folder
+      if [ -z "$2" ]; then echo "Usage: basket push <file>"; return 1; fi
+      echo "⬆️  Uploading '$2'..."
+      rclone copy "$2" "$REMOTE/" -P
       ;;
-    rm)
-      if [ -z "$ARG1" ]; then echo "Usage: basket rm <file> OR basket rm -r <folder>"; return 1; fi
-      # Recursive Delete
-      if [[ "$ARG1" == "-r" ]]; then
-         local FOLDER=$ARG2
-         if [ -z "$FOLDER" ]; then echo "Usage: basket rm -r <folder>"; return 1; fi
-         echo "🔥 Deleting everything inside '$FOLDER'..."
-         oci os object bulk-delete --namespace $NS --bucket-name $BUCKET --prefix "$FOLDER" --force
-         echo "✅ Cleaned up '$FOLDER'"
-         return 0
-      fi
-      # Single Delete
-      if oci os object delete --namespace $NS --bucket-name $BUCKET --name "$ARG1" --force 2>/dev/null; then
-         echo "🗑️ Deleted: $ARG1"
-      else
-         echo "❌ Error: Object '$ARG1' not found."
-      fi
-      ;;
+    
     pull)
-      if [ -z "$ARG1" ]; then echo "Usage: basket pull <remote_file>"; return 1; fi
-      oci os object get --namespace $NS --bucket-name $BUCKET --name "$ARG1" --file "$(basename "$ARG1")"
-      ;;
-    url)
-      if [ -z "$ARG1" ]; then echo "Usage: basket url <file>"; return 1; fi
+      # Download (Interactive Mode with FZF)
+      local TARGET="$2"
       
-      echo "🔗 Generating Magic Link for '$ARG1'..."
-      
-      # Calculate expiry (Works on Linux/GNU and MacOS/BSD)
-      # Sets expiry to 24 hours from now
-      if date --version >/dev/null 2>&1; then
-          # Linux (GNU Date)
-          local EXPIRY=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)
-      else
-          # Mac (BSD Date)
-          local EXPIRY=$(date -u -v+1d +%Y-%m-%dT%H:%M:%SZ)
+      # If no file specified, use FZF to find one in the bucket
+      if [ -z "$TARGET" ]; then
+        echo "🔍 Searching Basket..."
+        TARGET=$(rclone lsf "$REMOTE" -R --files-only | fzf --height 40% --layout=reverse --border)
+        [ -z "$TARGET" ] && return # Cancelled
       fi
 
-      # Generate the Pre-Authenticated Request
+      echo "⬇️  Downloading '$TARGET'..."
+      rclone copy "$REMOTE/$TARGET" . -P
+      ;;
+    
+    rm)
+      # Delete file
+      if [ -z "$2" ]; then echo "Usage: basket rm <file>"; return 1; fi
+      rclone delete "$REMOTE/$2" -P
+      echo "🗑️  Deleted '$2'"
+      ;;
+    
+    link)
+      # Generate Pre-Authenticated Request (Temp Link)
+      if [ -z "$2" ]; then echo "Usage: basket link <file>"; return 1; fi
+      
+      echo "🔗 Generating 24h Magic Link for '$2'..."
+      
+      # Calculate Expiry (GNU/Linux compatible)
+      local EXPIRY=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)
+      
+      # Create PAR via OCI CLI
       local PAR_PATH=$(oci os preauth-request create \
-         --namespace $NS --bucket-name $BUCKET \
+         --namespace $OCI_NS --bucket-name basket \
          --name "share_$(date +%s)" \
-         --object-name "$ARG1" \
+         --object-name "$2" \
          --access-type ObjectRead \
          --time-expires "$EXPIRY" \
-         --query "data.\"access-uri\"" --output raw)
+         --query "data.\"access-uri\"" --raw-output)
       
-      # Clean up output (sometimes contains quotes) and print
-      # Note: PAR_PATH comes with a leading slash
-      echo "https://objectstorage.ap-mumbai-1.oraclecloud.com${PAR_PATH}"
+      local FULL_URL="https://objectstorage.${OCI_REGION}.oraclecloud.com${PAR_PATH}"
+      _copy_to_clip "$FULL_URL"
+      echo "✅ Copied: $FULL_URL"
       ;;
+      
     *)
-      echo "Commands: ls [prefix], push <file>, pull <file>, rm [-r] <name>, url <file>"
+      echo "Usage: basket {ls | push <file> | pull [file] | rm <file> | link <file>}"
       ;;
   esac
 }
 
 # ------------------------------------------
-# 4. SITE (Public Web Hosting)
+# 2. SITE (The "Tamatar Vercel" Deployer)
 # ------------------------------------------
 site() {
-  if [ -z "$NS" ]; then export NS=$(oci os ns get --output json | jq -r '.data'); fi
   local CMD=$1
-  local ARG1=$2
-  local ARG2=$3
-  local BUCKET="website"
-
+  local REMOTE="oracle:website"
+  
   case "$CMD" in
     deploy)
-      # Usage: site deploy <local_folder> [remote_name]
-      local SITE_DIR="${ARG1%/}"
-      local REMOTE_NAME="$ARG2"
+      local SRC="$2"
+      local PROJECT="$3" # Project Name (Subdomain)
 
-      if [ -z "$SITE_DIR" ]; then echo "Usage: site deploy <folder> [project_name]"; return 1; fi
-      
-      # 1. Build Arguments
-      local -a UPLOAD_OPTS
-      UPLOAD_OPTS=(
-        --namespace "$NS"
-        --bucket-name "$BUCKET"
-        --src-dir "$SITE_DIR"
-        --overwrite
-        --content-type auto
-        --verify-checksum
-      )
-
-      local URL_SUFFIX=""
-      if [ -n "$REMOTE_NAME" ]; then
-         UPLOAD_OPTS+=(--object-prefix "${REMOTE_NAME}/")
-         URL_SUFFIX="${REMOTE_NAME}/"
-         echo "🚀 Deploying '$SITE_DIR' -> '.../$REMOTE_NAME/'"
-      else
-         echo "🚀 Deploying '$SITE_DIR' -> Root (Main Site)"
+      if [ -z "$SRC" ] || [ -z "$PROJECT" ]; then 
+        echo "Usage: site deploy <local_folder> <project_name>"
+        echo "Ex:    site deploy ./dist todo-app"
+        return 1
       fi
       
-      # 2. Execute Bulk Upload
-      oci os object bulk-upload "${UPLOAD_OPTS[@]}"
-
-      echo "✅ Live at: https://objectstorage.ap-mumbai-1.oraclecloud.com/n/$NS/b/$BUCKET/o/${URL_SUFFIX}index.html"
-      ;;
-   ls)
-      # 1. Header
-      echo -e "SIZE\tMODIFIED\tNAME"
+      echo "🚀 Deploying '$PROJECT' from '$SRC'..."
       
-      # 2. List -> jq (With Safety Check) -> Loop -> Column
-      oci os object list --namespace $NS --bucket-name $BUCKET --output json \
-      | jq -r '
-        def human_size: 
-          if . < 1024 then "\(.) B"
-          elif . < 1048576 then "\(. / 1024 | round) KB"
-          else "\(. / 1048576 * 10 | round / 10) MB"
-          end;
-        
-        # THE FIX: (.data // []) defaults to empty array if null, preventing crash
-        (.data // [])[] | [ (.size | human_size), .["time-modified"], .name ] | @tsv' \
-      | while IFS=$'\t' read -r size raw_time name; do
-          if [ -n "$raw_time" ]; then
-             local_time=$(date -d "$raw_time" "+%Y-%m-%d %H:%M")
-             echo -e "${size}\t${local_time}\t${name}"
-          fi
-      done \
-      | column -t -s $'\t'
+      # Sync to: website/project_name/
+      rclone sync "$SRC" "$REMOTE/$PROJECT/" \
+        --progress \
+        --transfers 16 \
+        --checksum \
+        --delete-excluded
+      
+      # Construct the SSL-safe URL
+      local URL="https://${PROJECT}-site.tamatar.dev"
+      
+      # Copy to clipboard
+      _copy_to_clip "$URL"
+      
+      echo "✅ Deployed Successfully!"
+      echo "🌍 Live at: $URL (Copied to clipboard)"
       ;;
+      
+    ls)
+      echo "📂 Active Projects:"
+      rclone lsf "$REMOTE" --dirs-only
+      ;;
+      
     rm)
-       if [ -z "$ARG1" ]; then echo "Usage: site rm <file> OR site rm -r <folder>"; return 1; fi
-       
-       if [[ "$ARG1" == "-r" ]]; then
-          if [ -z "$ARG2" ]; then echo "Usage: site rm -r <folder_name>"; return 1; fi
-          echo "🔥 Nuking folder '$ARG2' from website..."
-          oci os object bulk-delete --namespace $NS --bucket-name $BUCKET --prefix "$ARG2" --force
-       else
-          oci os object delete --namespace $NS --bucket-name $BUCKET --name "$ARG1" --force
-       fi
-       ;;
-       
-    url)
-      if [ -z "$ARG1" ]; then echo "Usage: site url <file_path>"; return 1; fi
-      echo "https://objectstorage.ap-mumbai-1.oraclecloud.com/n/$NS/b/$BUCKET/o/$ARG1"
+      local PROJECT="$2"
+      if [ -z "$PROJECT" ]; then echo "Usage: site rm <project_name>"; return 1; fi
+      
+      echo "🔥 Destroying Project: $PROJECT..."
+      rclone purge "$REMOTE/$PROJECT/"
+      echo "✅ Project deleted."
       ;;
       
     *)
-      echo "Commands: deploy <folder> [name], ls, rm, url"
+      echo "Usage: site {deploy <folder> <name> | ls | rm <name>}"
       ;;
   esac
 }
 
 # ------------------------------------------
-# 5. PANTRY (SQL Interface - Default)
+# 3. DROP (Quick Public Share)
 # ------------------------------------------
-# Access: Wallet (mTLS) via SQLcl
+# The "Imgur" killer. Uploads to public bucket, copies pretty URL.
+drop() {
+  local FILE="$1"
+  local REMOTE="oracle:website" # Or 'dropzone' if you made a separate bucket
+  local DOMAIN="share.tamatar.dev" # Your Cloudflare Domain
+
+  if [ ! -f "$FILE" ]; then echo "❌ File not found."; return 1; fi
+
+  echo "🍅 Dropping '$FILE'..."
+  
+  # Upload
+  rclone copy "$FILE" "$REMOTE/" -P
+
+  if [ $? -eq 0 ]; then
+    # URL Encode filename for web safety
+    local FILENAME=$(basename "$FILE")
+    local ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$FILENAME'))")
+    
+    local URL="https://${DOMAIN}/${ENCODED}"
+    _copy_to_clip "$URL"
+    echo "✅ Link Copied: $URL"
+  else
+    echo "❌ Upload failed."
+  fi
+}
+
+# ------------------------------------------
+# 4. DATABASES (Jam & Pantry)
+# ------------------------------------------
+
+# JAM (MySQL Heatwave)
+jam() {
+  [ -z "$JAM_PASS" ] && echo "⚠️  Env var JAM_PASS is missing" && return 1
+  local DB="$1"
+  [ -n "$DB" ] && shift
+  # Connect via Tailscale IP
+  MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$DB" "$@"
+}
+
+# PANTRY (Autonomous DB - SQL)
 pantry() {
-  # Ensure environment is ready
   [ -z "$TNS_ADMIN" ] && export TNS_ADMIN="$HOME/.oci/wallet"
   [ -z "$PANTRY_PASSWORD" ] && [ -f ~/.oci/.secrets ] && source ~/.oci/.secrets
 
   if [ -n "$1" ]; then
-     # Use CSV or JSON if requested, otherwise default to pretty ANSI
-     local FORMAT="ansiconsole"
-     if [[ "$1" == "--json" ]]; then FORMAT="json"; shift; fi
-     if [[ "$1" == "--csv" ]]; then FORMAT="csv"; shift; fi
-    
-    sql -L /nolog <<EOF
+     # One-off command
+     sql -L /nolog <<EOF
 connect ADMIN/"$PANTRY_PASSWORD"@pantry_high
 set sqlformat ansiconsole;
 $1
 EXIT;
 EOF
   else
-     # Interactive Mode
+     # Interactive
      sql ADMIN/"$PANTRY_PASSWORD"@pantry_high
   fi
-}
-
-
-
-# ------------------------------------------
-# 6. PANTRY-SH (Mongo Interface)
-# ------------------------------------------
-# Access: Public Endpoint via Mongosh
-pantrysh() {
-  # Check variables (Hostname is in secrets)
-  if [ -z "$PANTRY_PASSWORD" ] || [ -z "$PANTRY_HOST" ]; then
-    echo "Error: Credentials not set. Source ~/.oci/.secrets"
-    return 1
-  fi
-
-  # Encode password for URL safety
-  local PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote_plus('$PANTRY_PASSWORD'))")
-  
-  # Connect
-  mongosh "mongodb://ADMIN:$PASS@$PANTRY_HOST/ADMIN?authMechanism=PLAIN&authSource=\$external&ssl=true&retryWrites=false&loadBalanced=true" "$@"
 }
