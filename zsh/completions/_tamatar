@@ -1,4 +1,4 @@
-#compdef stock kv site basket drop jam pantry task
+#compdef stock kv site basket drop jam pantry task buckets
 
 # --- 1. STOCK COMPLETION ---
 _stock() {
@@ -160,6 +160,49 @@ _task() {
     esac
 }
 
+# --- 8. BUCKETS COMPLETION ---
+_buckets() {
+    local context state state_descr line
+    typeset -A opt_args
+    _arguments -C '1: :->cmds' '*:: :->args'
+
+    case $state in
+        cmds)
+            local -a commands
+            commands=(
+                'ls:List buckets or contents'
+                'mk:Create a new bucket'
+                'rm:Delete bucket or object'
+                'cp:Copy files (local<->remote)'
+                'sync:Mirror local folder to bucket'
+            )
+            _describe 'command' commands
+            ;;
+        args)
+            case $line[1] in
+                mk) 
+                    _message "New Bucket Name" 
+                    ;;
+                ls|rm) 
+                    # Hint: You can actually list active buckets here dynamically if you want
+                    # but simple message is faster for now
+                    _message "Bucket Name or Path (e.g. archive/photo.jpg)" 
+                    ;;
+                cp) 
+                    _arguments \
+                        '1:Source (Local path or bucket/file):_files' \
+                        '2:Destination (Local path or bucket/file):_files' 
+                    ;;
+                sync) 
+                    _arguments \
+                        '1:Local Source Folder:_files -/' \
+                        '2:Target Bucket Name' 
+                    ;;
+            esac
+            ;;
+    esac
+}
+
 # Route the completion to the correct function based on the command
 case "$service" in
     stock) _stock ;;
@@ -170,4 +213,5 @@ case "$service" in
     jam) _jam ;;
     pantry) _pantry ;;
     task) _task ;;
+    buckets) _buckets ;;
 esac

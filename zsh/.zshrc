@@ -115,32 +115,6 @@ export FZF_DEFAULT_OPTS="
   --preview 'bat --style=numbers --color=always --line-range :500 {}'
   --bind 'ctrl-/:toggle-preview'
 "
-# # --- Advanced FZF-Tab Configuration ---
-#
-# # disable sort when completing `git checkout`
-# zstyle ':completion:*:git-checkout:*' sort false
-#
-# # set descriptions format to enable group support
-# zstyle ':completion:*:descriptions' format '[%d]'
-#
-# # preview directory's content with lsd when completing cd
-# zstyle ':fzf-tab:complete:cd:*' fzf-preview 'lsd -1 --color=always --icon=always $realpath'
-#
-# # Make completion case-insensitive (e.g., typing 'f' matches 'File')
-# zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
-#
-# # Allow toggling the preview window with Ctrl+/ inside the Tab menu
-# zstyle ':fzf-tab:*' fzf-bindings 'ctrl-/:toggle-preview'
-#
-# # THE SMART PREVIEW LOGIC:
-# # Only show preview for files (-f) and directories (-d)
-# zstyle ':fzf-tab:complete:*:*' fzf-preview '
-#   if [[ -d $realpath ]]; then
-#     lsd -1 --color=always --icon=always $realpath
-#   elif [[ -f $realpath ]]; then
-#     bat --color=always --style=numbers --line-range=:500 $realpath
-#   fi'
-#
 
 # --- FZF-TAB Styling (The "Pro" Look) ---
 
@@ -155,7 +129,13 @@ zstyle ':completion:*:descriptions' format '[%d]'
 # This makes the command green and the description gray/dim
 zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
 
-# 4. Smart Previews
+# 4. Allow toggling the preview window with Ctrl+/ inside the Tab menu
+zstyle ':fzf-tab:*' fzf-bindings 'ctrl-/:toggle-preview'
+
+# 5. disable sort when completing `git checkout`
+zstyle ':completion:*:git-checkout:*' sort false
+
+# 6. Smart Previews
 # - For 'cd', 'ls', etc: Show directory contents with lsd
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'lsd -1 --color=always --icon=always $realpath'
 # - For everything else (like your custom functions): No preview window unless it's a file
