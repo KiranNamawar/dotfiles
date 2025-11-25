@@ -41,15 +41,11 @@ source $ZSH/oh-my-zsh.sh
 
 # User configuration
 
-# --- Load Cloud Utilities ---
-if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
-    source ~/.dotfiles/zsh/oci_functions.zsh
-fi
-
 # --- Load functions ---
 if [ -f ~/.dotfiles/zsh/functions.zsh ]; then
     source ~/.dotfiles/zsh/functions.zsh
 fi
+
 # export MANPATH="/usr/local/man:$MANPATH"
 
 # Set personal aliases, overriding those provided by Oh My Zsh libs,

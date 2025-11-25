@@ -261,4 +261,42 @@ tkill() {
     fi
 }
 
+# ==========================================
+#  IMAGE VIEWER (Smart)
+# ==========================================
+# Usage: view image.png         (Tries inline Kitty first)
+#        view -g image.png      (Forces GUI window)
+view() {
+    local force_gui=0
+    local file=""
 
+    # 1. Parse Flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -g|--gui)
+                force_gui=1
+                shift
+                ;;
+            *)
+                file="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$file" ]; then echo "Usage: view [-g] <file>"; return 1; fi
+
+    # 2. Logic: GUI vs Inline
+    if [ "$force_gui" -eq 1 ]; then
+        # User explicitly asked for GUI
+        xdg-open "$file" >/dev/null 2>&1
+    elif [[ -n "$KITTY_PID" ]] && command -v kitten &> /dev/null; then
+    # Default: Try Kitty Inline
+        kitten icat "$file"
+    elif command -v xdg-open &> /dev/null; then
+        # Fallback: System Viewer
+        xdg-open "$file" >/dev/null 2>&1
+    else
+        echo "❌ No image viewer found."
+    fi
+}
