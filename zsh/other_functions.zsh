@@ -68,67 +68,80 @@ notify() {
 alias alert=notify
 
 
-# ------------------------------------------
-# GROQ AI (The Terminal Brain)
-# ------------------------------------------
+# ==========================================
+#  TAMATAR INTELLIGENCE LAYER (Groq AI)
+# ==========================================
+
+# 1. CORE FUNCTION (ask)
+# The engine that powers everything else.
+# Usage: ask "question"
+#        ask -s "system prompt" "question"
+#        echo "input" | ask "question"
 ask() {
-    # 2. Get API Key
+    # --- CREDENTIALS ---
     local api_key="$GROQ_API_KEY"
     if [ -z "$api_key" ] && command -v jam &> /dev/null; then
-        vault load "GROQ_API_KEY" 2>/dev/null
+        api_key=$(jam -N -B -e "SELECT v FROM utils.secrets WHERE k='GROQ_API_KEY';" 2>/dev/null)
     fi
-    api_key="$GROQ_API_KEY"
+    if [ -z "$api_key" ]; then echo "❌ Error: GROQ_API_KEY missing."; return 1; fi
 
-    if [ -z "$api_key" ]; then
-        echo "❌ Error: GROQ_API_KEY not found in environment or vault."
-        echo "   Run: vault add GROQ_API_KEY '...'"
-        return 1
-    fi
+    # --- FLAG PARSING ---
+    local sys_prompt="You are a Linux CLI expert. Provide concise, accurate answers. Output Markdown."
+    local user_prompt=""
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -s|--system)
+                sys_prompt="$2"
+                shift 2
+                ;;
+            *)
+                user_prompt="$1"
+                shift
+                ;;
+        esac
+    done
 
-    # 2. Input Handling (Text arg or Pipe)
-    local prompt="$*"
-    if [ -z "$prompt" ]; then
+    # --- INPUT HANDLING (Pipe vs Arg) ---
+    if [ -z "$user_prompt" ]; then
         if [ ! -t 0 ]; then
-            prompt=$(cat) # Read from pipe
+            user_prompt=$(cat) # Read piped input
         else
-            echo "Usage: ask 'how do I unzip tar.gz'"
-            echo "       cat error.log | ask 'explain this error'"
+            echo "Usage: ask 'how do I...'"
             return 1
         fi
     fi
 
+    # --- API REQUEST ---
     echo "🤔 Thinking..."
-
-    # 3. Construct JSON (Safely using jq)
-    #    We use Llama3-8b because it's insanely fast for CLI tools.
+    
     local json_payload=$(jq -n \
-        --arg content "$prompt" \
-        --arg model "llama3-8b-8192" \
+        --arg content "$user_prompt" \
+        --arg sys "$sys_prompt" \
+        --arg model "llama-3.1-8b-instant" \
         '{
            model: $model,
            messages: [
-             {role: "system", content: "You are a Linux CLI expert. Provide concise, accurate answers. Output Markdown. Do not be chatty."},
+             {role: "system", content: $sys},
              {role: "user", content: $content}
-           ]
+           ],
+           temperature: 0.1
          }')
 
-    # 4. API Request
     local response=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" \
         -H "Authorization: Bearer $api_key" \
         -H "Content-Type: application/json" \
         -d "$json_payload")
 
-    # 5. Parse Output
-    local answer=$(echo "$response" | jq -r '.choices[0].message.content')
+    # --- OUTPUT HANDLING (Printf Safe) ---
+    local answer=$(printf '%s' "$response" | jq -r '.choices[0].message.content')
 
-    # 6. Render (Use Glow if available, else plain text)
+    printf "\r\033[K" # Clear "Thinking..." line
+    
     if [ "$answer" = "null" ]; then
         echo "❌ API Error:"
-        echo "$response" | jq .
+        printf '%s' "$response" | jq . 2>/dev/null
     else
-        # Clear the "Thinking..." line
-        printf "\r\033[K" 
-        
         if command -v glow &> /dev/null; then
             echo "$answer" | glow -
         else
@@ -137,90 +150,94 @@ ask() {
     fi
 }
 
-
 # ------------------------------------------
-# AI GIT COMMIT (gcmt) - Delta Safe Version
+# 2. THE CODE JANITOR (refactor)
 # ------------------------------------------
-gcmt() {
-    # 1. Pre-Flight Checks
-    if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-        echo "❌ Not a git repository."
-        return 1
-    fi
-
-    if git diff --cached --quiet; then
-        echo "⚠️  No staged changes found."
-        echo "   Use 'git add .' or 'git add <file>' first."
-        return 1
-    fi
-
-    # 2. Get API Key
-    local api_key="$GROQ_API_KEY"
-    if [ -z "$api_key" ] && command -v jam &> /dev/null; then
-        vault load "GROQ_API_KEY" 2>/dev/null
-    fi
-    api_key="$GROQ_API_KEY"
-
-    if [ -z "$api_key" ]; then
-        echo "❌ Error: GROQ_API_KEY not found."
-        return 1
-    fi
-
-    # 3. Prepare the Diff (DELTA FIX IS HERE)
-    echo "🤔 Reading staged changes..."
-    # --no-color: Strips ANSI colors (delta colors)
-    # --no-ext-diff: Ignores external diff tools
-    # head -c 6000: Prevents sending massive files to API
-    local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 6000)
-
-    # 4. System Prompt
-    local system_prompt="You are a senior developer. Write a Semantic Git Commit Message based on the diff.
-    Format: <type>(<scope>): <subject>
-    Rules:
-    - Use Imperative Mood ('Add' not 'Added').
-    - Types: feat, fix, docs, style, refactor, test, chore.
-    - If breaking, add '!' after type.
-    - Output ONLY the raw commit message. No markdown blocks, no quotes."
-
-    # 5. Call Groq API
-    echo "🤖 Generating message..."
-    local json_payload=$(jq -n \
-        --arg content "$diff_content" \
-        --arg sys "$system_prompt" \
-        --arg model "llama3-8b-8192" \
-        '{
-           model: $model,
-           messages: [
-             {role: "system", content: $sys},
-             {role: "user", content: $content}
-           ],
-           temperature: 0.2
-         }')
-
-    local response=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" \
-        -H "Authorization: Bearer $api_key" \
-        -H "Content-Type: application/json" \
-        -d "$json_payload")
-
-    # 6. Parse Result
-    local msg=$(echo "$response" | jq -r '.choices[0].message.content')
+# Purpose: Cleans up messy scripts, adds comments, optimizes logic.
+# Usage: cat script.sh | refactor
+#        refactor < script.py
+refactor() {
+    local sys="You are a Clean Code expert. Rewrite the provided code to be:
+    1. Efficient and Secure (ShellCheck compliant).
+    2. Readable (add comments explaining complex logic).
+    3. Robust (add error handling).
+    Output ONLY the code block."
     
-    # Cleanup
-    msg=$(echo "$msg" | sed 's/^```.*//g' | sed 's/```$//g' | sed 's/^"//' | sed 's/"$//' | awk '{$1=$1};1')
+    ask -s "$sys"
+}
 
-    if [ -z "$msg" ] || [ "$msg" = "null" ]; then
-        echo "❌ Failed to generate message."
-        return 1
-    fi
+# ------------------------------------------
+# 3. THE UNIVERSAL CONVERTER (morph)
+# ------------------------------------------
+# Purpose: Transforms data from one format to another (JSON, CSV, YAML, Table).
+# Usage: vault ls | morph "json"
+#        cat data.csv | morph "markdown table"
+morph() {
+    local target_format="$1"
+    if [ -z "$target_format" ]; then echo "Usage: morph 'format' (e.g. json, csv)"; return 1; fi
+    
+    local sys="You are a Data Transformation Engine. Convert the input text into $target_format.
+    Rules:
+    - Do not summarize or explain.
+    - Output ONLY the raw data in the requested format.
+    - If the input is empty or invalid, return an empty string."
+    
+    ask -s "$sys"
+}
 
-    # 7. Interactive Review
+# ------------------------------------------
+# 4. THE SECURITY AUDITOR (audit)
+# ------------------------------------------
+# Purpose: Scans config files or scripts for security risks.
+# Usage: cat /etc/ssh/sshd_config | audit
+#        cat nginx.conf | audit
+audit() {
+    local sys="You are a Cyber Security Expert. Analyze this configuration file or script.
+    Output a Checklist:
+    - ❌ [CRITICAL]: List dangerous settings (e.g. root login enabled, 777 permissions).
+    - ⚠️ [WARNING]: List best practices missing.
+    - ✅ [SAFE]: If the file looks good.
+    Be concise."
+    
+    ask -s "$sys"
+}
+
+# ------------------------------------------
+# 5. THE DEBUGGER (why)
+# ------------------------------------------
+# Purpose: Explains cryptic errors and suggests fixes.
+# Usage: python main.py 2>&1 | why
+#        docker build . 2>&1 | why
+why() {
+    local sys="You are a Senior DevOps Debugger. 
+    1. Analyze the error log provided.
+    2. Explain the root cause in one sentence.
+    3. Provide 3 specific, executable steps to fix it.
+    4. If it suggests a command, wrap it in code blocks."
+    
+    ask -s "$sys"
+}
+
+# ------------------------------------------
+# 6. GIT COMMIT (gcmt)
+# ------------------------------------------
+# Purpose: Writes semantic git commit messages from staged changes.
+gcmt() {
+    if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then echo "❌ Not a git repo."; return 1; fi
+    if git diff --cached --quiet; then echo "⚠️  No staged changes."; return 1; fi
+
+    local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 6000)
+    
+    # We use 'ask' here directly to reuse the API logic, but we parse the output raw
+    # Note: We strip markdown code blocks in case the model adds them
+    local msg=$(echo "$diff_content" | ask -s "You are a senior dev. Write a Semantic Git Commit Message. Format: <type>(<scope>): <subject>. Imperative mood. Output ONLY the raw message string." | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
+
+    if [ -z "$msg" ]; then return 1; fi
+
     echo ""
-    echo "---------------------------------------------------"
     echo -e "\033[1;32m$msg\033[0m"
-    echo "---------------------------------------------------"
-    echo -n "🚀 Commit with this message? [y/n/e(dit)]: "
+    echo -n "🚀 Commit? [y/n/e]: "
     read -r choice
-
     case "$choice" in
         y|Y) git commit -m "$msg" ;;
         e|E) git commit -m "$msg" -e ;;
