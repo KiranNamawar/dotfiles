@@ -216,9 +216,8 @@ fop() {
             # cd "$dir" && nvim "$file"
 
             # Open file
-            local file=$(basename "$selected")
             echo "📝 Opening file..."
-            nvim "$file"
+            nvim "$selected"
         fi
     fi
 }
@@ -231,3 +230,21 @@ _fop_widget() {
 }
 zle -N _fop_widget
 bindkey '^o' _fop_widget
+
+
+# ------------------------------------------
+# TMUX KILLER (tkill)
+# ------------------------------------------
+tkill() {
+    # 1. List sessions
+    # 2. Filter out the current session (so you don't kill yourself)
+    # 3. FZF to select
+    local target=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | \
+        grep -v "^$(tmux display-message -p '#S' 2>/dev/null)$" | \
+        fzf --height=20% --layout=reverse --border --header="🔥 Select Session to KILL")
+
+    if [[ -n "$target" ]]; then
+        tmux kill-session -t "$target"
+        echo "💀 Killed session: $target"
+    fi
+}
