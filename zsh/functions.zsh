@@ -1,3 +1,15 @@
+
+# --- Load OCI Functions
+if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
+    source ~/.dotfiles/zsh/oci_functions.zsh
+fi
+
+# --- Load Other Functions
+if [ -f ~/.dotfiles/zsh/other_functions.zsh ]; then
+    source ~/.dotfiles/zsh/other_functions.zsh
+fi
+
+
 # ------------------------------------------
 # JQE (JSON Query Explorer)
 # Usage: jqe file.json OR echo '{"a":1}' | jqe
@@ -248,3 +260,5 @@ tkill() {
         echo "💀 Killed session: $target"
     fi
 }
+
+
