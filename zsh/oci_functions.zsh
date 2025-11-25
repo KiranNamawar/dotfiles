@@ -644,3 +644,181 @@ task() {
       ;;
   esac
 }
+
+
+# ------------------------------------------
+# VAULT (Secret Injection via MySQL)
+# ------------------------------------------
+vault() {
+  local CMD=$1
+  local KEY=$2
+  local VAL=$3
+
+  _sql_escape() { echo "${1//\'/\'\'}"; }
+
+  # Helper: Interactive Key Selector
+  _vault_pick() {
+    if command -v fzf &> /dev/null; then
+       jam -N -B -e "SELECT CONCAT(k, ' (', category, ')') FROM utils.secrets ORDER BY category, k;" \
+       | fzf --height 40% --layout=reverse --border --header="Select Secret" \
+       | awk '{print $1}'
+    fi
+  }
+
+  case "$CMD" in
+    # 1. ADD: vault add KEY VAL [category]
+    add)
+      if [ -z "$KEY" ] || [ -z "$VAL" ]; then echo "Usage: vault add <KEY> <VALUE> [category]"; return 1; fi
+      local CAT="${4:-general}"
+      
+      local SAFE_KEY=$(_sql_escape "$KEY")
+      local SAFE_VAL=$(_sql_escape "$VAL")
+      local SAFE_CAT=$(_sql_escape "$CAT")
+      
+      jam -e "INSERT INTO utils.secrets (k, v, category) VALUES ('$SAFE_KEY', '$SAFE_VAL', '$SAFE_CAT') 
+              ON DUPLICATE KEY UPDATE v='$SAFE_VAL', category='$SAFE_CAT';"
+      echo "🔒 Secret '$KEY' secured in '$CAT'."
+      ;;
+
+    # 2. LOAD: vault load [KEY] (Single)
+    load)
+      if [ -z "$KEY" ]; then KEY=$(_vault_pick); fi
+      if [ -z "$KEY" ]; then echo "Usage: vault load <KEY>"; return 1; fi
+
+      local SAFE_KEY=$(_sql_escape "$KEY")
+      local SECRET=$(jam -N -B -e "SELECT v FROM utils.secrets WHERE k='$SAFE_KEY';")
+      
+      if [ -n "$SECRET" ]; then
+        export "$KEY"="$SECRET"
+        echo "🔓 Exported $KEY to current session."
+      else
+        echo "❌ Secret '$KEY' not found."
+      fi
+      ;;
+
+    # 3. ENV: vault env [CATEGORY] (Bulk Load)
+    env)
+      local CAT=$KEY
+      
+      # Interactive: Pick category if none provided
+      if [ -z "$CAT" ] && command -v fzf &> /dev/null; then
+        local RAW_MYSQL="MYSQL_PWD='$JAM_PASS' mysql -h 10.0.1.57 -u admin"
+        local PREVIEW_CMD="printf \"SELECT k FROM utils.secrets WHERE category='%s' ORDER BY k\" {} | $RAW_MYSQL -N -B | head -n 20"
+
+         CAT=$(jam -N -B -e "SELECT DISTINCT category FROM utils.secrets;" | fzf \
+            --height 40% \
+            --layout=reverse \
+            --border \
+            --header="Select Context (Preview shows keys)" \
+            --preview "$PREVIEW_CMD" \
+            --preview-window="right:40%:wrap" \
+         )
+      fi
+
+      if [ -z "$CAT" ]; then echo "Usage: vault env <CATEGORY>"; return 1; fi
+
+      local SAFE_CAT=$(_sql_escape "$CAT")
+      local COUNT=0
+      
+      echo "🔓 Loading '$CAT' environment..."
+      
+      # Loop through results and export them
+      while IFS=$'\t' read -r k v; do
+         if [ -n "$k" ]; then
+           export "$k"="$v"
+           echo "   + $k"
+           ((COUNT++))
+         fi
+      done < <(jam -N -B -e "SELECT k, v FROM utils.secrets WHERE category='$SAFE_CAT';")
+      
+      if [ "$COUNT" -eq 0 ]; then
+         echo "⚠️  No secrets found for category '$CAT'."
+      else
+         echo "✅ Loaded $COUNT secrets."
+      fi
+      ;;
+
+    # 4. PEEK: vault peek [KEY]
+    peek)
+      if [ -z "$KEY" ]; then KEY=$(_vault_pick); fi
+      if [ -z "$KEY" ]; then echo "Usage: vault peek <KEY>"; return 1; fi
+
+      local SAFE_KEY=$(_sql_escape "$KEY")
+      local SECRET=$(jam -N -B -e "SELECT v FROM utils.secrets WHERE k='$SAFE_KEY';")
+      
+      if [ -n "$SECRET" ]; then
+        _copy_to_clip "$SECRET"  # Ensure you have this helper defined elsewhere or use xclip/pbcopy directly
+        echo "📋 Secret '$KEY' copied to clipboard (hidden)."
+      else
+        echo "❌ Secret '$KEY' not found."
+      fi
+      ;;
+
+    # 5. LS: List keys (Updated to accept category)
+    ls)
+      # If $KEY ($2) is provided, we filter by it. Otherwise list all.
+      local FILTER_CAT=$KEY
+      local QUERY="SELECT category, k, updated_at FROM utils.secrets"
+      
+      if [ -n "$FILTER_CAT" ]; then
+        local SAFE_CAT=$(_sql_escape "$FILTER_CAT")
+        QUERY="$QUERY WHERE category='$SAFE_CAT'"
+      fi
+      
+      QUERY="$QUERY ORDER BY category, k;"
+      
+      jam -N -B -e "SET time_zone='+05:30'; $QUERY" | column -t -s $'\t'
+      ;;
+
+    # 6. RM: vault rm [KEY]
+    rm)
+      if [ -z "$KEY" ]; then KEY=$(_vault_pick); fi
+      if [ -z "$KEY" ]; then echo "Usage: vault rm <KEY>"; return 1; fi
+
+      local SAFE_KEY=$(_sql_escape "$KEY")
+      jam -e "DELETE FROM utils.secrets WHERE k='$SAFE_KEY';"
+      echo "🗑️  Deleted $KEY"
+      ;;
+    # 7. PRUNE: vault prune [CATEGORY] (Delete entire category)
+    prune)
+      local CAT=$KEY # $2 is passed as KEY at top of function
+      
+      # 1. Interactive: Pick category if none provided
+      if [ -z "$CAT" ] && command -v fzf &> /dev/null; then
+         CAT=$(jam -N -B -e "SELECT DISTINCT category FROM utils.secrets;" | fzf \
+            --height 40% \
+            --layout=reverse \
+            --border \
+            --header="🔥 SELECT CATEGORY TO DELETE (ALL KEYS) 🔥" \
+         )
+      fi
+
+      if [ -z "$CAT" ]; then echo "Usage: vault prune <CATEGORY>"; return 1; fi
+
+      local SAFE_CAT=$(_sql_escape "$CAT")
+      
+      # 2. Safety Check: Count how many secrets exist
+      local COUNT=$(jam -N -B -e "SELECT COUNT(*) FROM utils.secrets WHERE category='$SAFE_CAT';")
+      
+      if [ "$COUNT" -eq 0 ]; then
+         echo "⚠️  Category '$CAT' is already empty or does not exist."
+         return
+      fi
+
+      # 3. Confirmation Prompt
+      echo "🔥 DANGER: You are about to delete the entire '$CAT' category."
+      echo -n "❓ This will destroy $COUNT secrets. Are you sure? [y/N] "
+      read -r CONFIRM
+      
+      if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+         jam -e "DELETE FROM utils.secrets WHERE category='$SAFE_CAT';"
+         echo "🗑️  Nuked $COUNT secrets from '$CAT'."
+      else
+         echo "❌ Aborted."
+      fi
+      ;;
+    *)
+      echo "Usage: vault {add | load | env | peek | ls | rm}"
+      ;;
+  esac
+}

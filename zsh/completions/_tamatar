@@ -1,4 +1,4 @@
-#compdef stock kv site basket drop jam pantry task buckets
+#compdef stock kv site basket drop jam pantry task buckets vault
 
 # --- 1. STOCK COMPLETION ---
 _stock() {
@@ -203,6 +203,45 @@ _buckets() {
     esac
 }
 
+# --- 9. VAULT COMPLETION ---
+_vault() {
+    local context state state_descr line
+    typeset -A opt_args
+    _arguments -C '1: :->cmds' '*:: :->args'
+
+    case $state in
+        cmds)
+            local -a commands
+            commands=(
+                'add:Secure a new secret (Usage: add KEY VAL [cat])'
+                'load:Export one secret (Usage: load [KEY])'
+                'env:Load ALL secrets for a project (Usage: env [CAT])'  # <-- NEW
+                'peek:Copy to clipboard silently (Usage: peek [KEY])'
+                'ls:List secrets (optional category filter)'
+                'rm:Delete a secret (Usage: rm [KEY])'
+                'prune:Delete an entire category'
+            )
+            _describe 'command' commands
+            ;;
+        args)
+            case $line[1] in
+                add)
+                    _arguments \
+                        '1:Key Name (e.g. OPENAI_KEY)' \
+                        '2:Secret Value' \
+                        '3:Category (default: general)'
+                    ;;
+                load|peek|rm)
+                    _message "Key Name (Press Enter for Menu)"
+                    ;;
+                env|prune)
+                    _message "Category Name (Press Enter for Menu)"
+                    ;;
+            esac
+            ;;
+    esac
+}
+
 # Route the completion to the correct function based on the command
 case "$service" in
     stock) _stock ;;
@@ -214,4 +253,5 @@ case "$service" in
     pantry) _pantry ;;
     task) _task ;;
     buckets) _buckets ;;
+    vault) _vault ;;
 esac
