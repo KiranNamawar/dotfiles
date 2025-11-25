@@ -563,8 +563,13 @@ stock() {
       echo "🗑️  Processed [$FULL_KEY]"
       ;;
 
-    *)
-      echo "Usage: stock {set <key.path> <val> | get <key.path> | ls | rm <key>}"
+    *)  
+      # If no args, run ls (The Menu)
+      if [ -z "$CMD" ]; then
+        stock ls
+      else
+        echo "Usage: stock {set | get | ls | rm}"
+      fi
       ;;
   esac
 }
