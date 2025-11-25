@@ -113,8 +113,9 @@ ask() {
     fi
 
     # --- API REQUEST ---
-    echo "🤔 Thinking..."
-    
+    # Send "Thinking" to stderr (>&2) so it is NOT captured by variables
+    echo "🤔 Thinking..." >&2
+
     local json_payload=$(jq -n \
         --arg content "$user_prompt" \
         --arg sys "$sys_prompt" \
@@ -136,17 +137,18 @@ ask() {
     # --- OUTPUT HANDLING (Printf Safe) ---
     local answer=$(printf '%s' "$response" | jq -r '.choices[0].message.content')
 
-    printf "\r\033[K" # Clear "Thinking..." line
+    # Clear the "Thinking" line on stderr
+    printf "\r\033[K" >&2
     
     if [ "$answer" = "null" ]; then
         echo "❌ API Error:"
         printf '%s' "$response" | jq . 2>/dev/null
     else
-        if command -v glow &> /dev/null; then
+      if command -v glow &> /dev/null && [ -t 1 ]; then
             echo "$answer" | glow -
-        else
+      else
             echo "$answer"
-        fi
+      fi
     fi
 }
 
