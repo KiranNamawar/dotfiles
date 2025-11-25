@@ -320,6 +320,24 @@ EOF
 
 
 # ------------------------------------------
+# 6. PANTRY-SH (Direct Public Access)
+# ------------------------------------------
+pantrysh() {
+
+  if [ -z "$PANTRY_PASSWORD" ] || [ -z "$PANTRY_HOST" ]; then
+    echo "❌ Error: Env vars PANTRY_PASSWORD or PANTRY_HOST not set."
+    return 1
+  fi
+
+  # 2. Encode Password
+  local PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote_plus('$PANTRY_PASSWORD'))")
+
+  # 3. Connect Direct
+  mongosh "mongodb://ADMIN:$PASS@$PANTRY_HOST/ADMIN?authMechanism=PLAIN&authSource=\$external&ssl=true&retryWrites=false&loadBalanced=true" "$@"
+}
+
+
+# ------------------------------------------
 # KV STORE (Persistent Dictionary via MySQL)
 # ------------------------------------------
 kv() {
@@ -393,6 +411,160 @@ kv() {
 
     *)
       echo "Usage: kv {set <k> <v> | get <k> | ls | rm <k>}"
+      ;;
+  esac
+}
+
+
+# ------------------------------------------
+# STOCK (JSON Store via Pantry)
+# ------------------------------------------
+stock() {
+  local CMD=$1
+  local FULL_KEY=$2
+  local INPUT_VAL=$3
+
+  _mongo_exec() {
+    pantrysh --quiet --eval "$1"
+  }
+
+  _parse_key() {
+    if [[ "$FULL_KEY" == *.* ]]; then
+      DOC_ID="${FULL_KEY%%.*}"
+      DOC_PATH="${FULL_KEY#*.}"
+    else
+      DOC_ID="$FULL_KEY"
+      DOC_PATH="v"
+    fi
+  }
+
+  case "$CMD" in
+    set)
+      if [ -z "$FULL_KEY" ] || [ -z "$INPUT_VAL" ]; then echo "Usage: stock set <key.path> <value|@file>"; return 1; fi
+      
+      if [[ "$INPUT_VAL" == @* ]]; then
+        local FILE_PATH="${INPUT_VAL#@}"
+        if [ ! -f "$FILE_PATH" ]; then echo "❌ File '$FILE_PATH' not found."; return 1; fi
+        INPUT_VAL=$(cat "$FILE_PATH")
+      fi
+
+      _parse_key 
+      echo "📦 Stocking '$DOC_PATH' into '$DOC_ID'..." >&2
+
+      local B64_VAL=$(echo -n "$INPUT_VAL" | base64 | tr -d '\n')
+
+      local OUT=$(_mongo_exec "
+        var valString = Buffer.from('$B64_VAL', 'base64').toString('utf-8');
+        var finalVal = valString;
+        try { finalVal = JSON.parse(valString); } catch(e) {}
+        
+        db.getSiblingDB('utils').stock.updateOne(
+          {_id: '$DOC_ID'}, 
+          {\$set: { '$DOC_PATH': finalVal, updated: new Date() }}, 
+          {upsert: true}
+        )
+      ")
+      
+      if [[ "$OUT" == *"acknowledged"* ]]; then
+        echo "✅ Stocked: [$FULL_KEY]"
+      else
+        echo "❌ Failed: $OUT"
+        return 1
+      fi
+      ;;
+
+    get)
+      # Auto-Select (Menu)
+      if [ -z "$FULL_KEY" ]; then
+         stock ls
+         return
+      fi
+
+      local FILTER="$3"
+
+      # Fetch Data
+      if [[ "$FULL_KEY" == *.* ]]; then
+        _parse_key
+        local JS_QUERY="
+          var doc = db.getSiblingDB('utils').stock.findOne({_id: '$DOC_ID'});
+          if(!doc) print('NULL');
+          else {
+            var path = '$DOC_PATH'.split('.');
+            var res = doc;
+            for(var i=0; i<path.length; i++) {
+               if(res === undefined || res === null) break;
+               res = res[path[i]];
+            }
+            if(res === undefined) print('NULL');
+            else if(typeof res === 'object') print(JSON.stringify(res));
+            else print(res);
+          }
+        "
+      else
+        local JS_QUERY="
+           var doc = db.getSiblingDB('utils').stock.findOne({_id: '$FULL_KEY'}); 
+           if(!doc) print('NULL'); 
+           else { delete doc._id; delete doc.updated; print(JSON.stringify(doc)); }
+        "
+      fi
+
+      local RESULT=$(_mongo_exec "$JS_QUERY")
+
+      if [[ "$RESULT" == *"NULL"* ]] || [[ -z "$RESULT" ]]; then
+        echo "❌ '$FULL_KEY' not found." >&2
+        return 1
+      fi
+
+      # --- INTEGRATION: If no filter, use JQE ---
+      if [ -z "$FILTER" ]; then
+         # Check if it looks like a JSON object/array
+         if [[ "$RESULT" == \{* ]] || [[ "$RESULT" == \[* ]]; then
+            echo "$RESULT" | jqe
+         else
+            echo "$RESULT" # It's just a string/number
+         fi
+      else
+         echo "$RESULT" | jq -r "$FILTER" 2>/dev/null
+      fi
+      ;;
+
+    ls)
+      local DATA=$(_mongo_exec "db.getSiblingDB('utils').stock.find({}).forEach(doc => { 
+          var id = doc._id; 
+          delete doc._id; delete doc.updated; 
+          print(id + '\t' + Buffer.from(JSON.stringify(doc)).toString('base64')) 
+      })")
+      
+      if command -v fzf &> /dev/null; then
+        local SELECTED=$(echo "$DATA" | fzf \
+            --height 40% --layout=reverse --border --header="Select Stock Item" \
+            --delimiter=$'\t' --with-nth=1 \
+            --preview='echo {2} | base64 --decode | jq .' \
+            --preview-window='right:60%:wrap')
+
+        if [ -n "$SELECTED" ]; then
+           local KEY=$(echo "$SELECTED" | cut -f1)
+           # If selected, run 'stock get' on it to trigger the JQE explorer
+           stock get "$KEY"
+        fi
+      else
+        echo "$DATA" | cut -f1
+      fi
+      ;;
+
+    rm)
+      if [ -z "$FULL_KEY" ]; then echo "Usage: stock rm <key.path>"; return 1; fi
+      _parse_key
+      if [[ "$DOC_PATH" == "v" ]]; then
+         _mongo_exec "db.getSiblingDB('utils').stock.deleteOne({_id: '$DOC_ID'})" > /dev/null
+      else
+         _mongo_exec "db.getSiblingDB('utils').stock.updateOne({_id: '$DOC_ID'}, {\$unset: {'$DOC_PATH': 1}})" > /dev/null
+      fi
+      echo "🗑️  Processed [$FULL_KEY]"
+      ;;
+
+    *)
+      echo "Usage: stock {set <key.path> <val> | get <key.path> | ls | rm <key>}"
       ;;
   esac
 }

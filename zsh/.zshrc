@@ -93,6 +93,11 @@ source $ZSH/oh-my-zsh.sh
 if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
     source ~/.dotfiles/zsh/oci_functions.zsh
 fi
+
+# --- Load functions ---
+if [ -f ~/.dotfiles/zsh/functions.zsh ]; then
+    source ~/.dotfiles/zsh/functions.zsh
+fi
 # export MANPATH="/usr/local/man:$MANPATH"
 
 # You may need to manually set your language environment
