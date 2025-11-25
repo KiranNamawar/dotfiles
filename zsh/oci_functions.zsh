@@ -573,3 +573,74 @@ stock() {
       ;;
   esac
 }
+
+
+
+# ------------------------------------------
+# TASK MANAGER (MySQL Backed)
+# ------------------------------------------
+task() {
+  local CMD=$1
+  local ARG="${@:2}" # Capture all remaining args as the task text
+
+  _sql_escape() { echo "${1//\'/\'\'}"; }
+
+  case "$CMD" in
+    add)
+      if [ -z "$ARG" ]; then echo "Usage: task add <text>"; return 1; fi
+      local SAFE_CONTENT=$(_sql_escape "$ARG")
+      jam -e "INSERT INTO utils.tasks (content) VALUES ('$SAFE_CONTENT');"
+      echo "✅ Task added."
+      ;;
+    
+    ls)
+      # Fetch tasks. Use -N (no headers) -B (batch) for clean parsing
+      local DATA=$(jam -N -B -e "SET time_zone='+05:30'; SELECT id, content, created_at FROM utils.tasks WHERE status='pending' ORDER BY id DESC;")
+      
+      if [ -z "$DATA" ]; then
+        echo "✨ No pending tasks. Good job!"
+        return
+      fi
+
+      # Print pretty table
+      echo "$DATA" | column -t -s $'\t'
+      ;;
+    
+    done)
+      local ID=$2
+      
+      # Interactive Mode: If no ID provided, use FZF
+      if [ -z "$ID" ]; then
+        if command -v fzf &> /dev/null; then
+           # Get list -> Select -> Extract ID (Column 1)
+           local DATA=$(jam -N -B -e "SELECT id, content FROM utils.tasks WHERE status='pending' ORDER BY id DESC;")
+           if [ -z "$DATA" ]; then echo "✨ Nothing to do."; return; fi
+           
+           ID=$(echo "$DATA" | fzf --height 40% --layout=reverse --border --header="Select Task to Complete" | awk '{print $1}')
+           [ -z "$ID" ] && return # Cancelled
+        else
+           echo "Usage: task done <id>"
+           return 1
+        fi
+      fi
+
+      jam -e "UPDATE utils.tasks SET status='done' WHERE id=$ID;"
+      echo "🎉 Task $ID completed!"
+      ;;
+      
+    clean)
+      echo "🧹 Cleaning up old completed tasks..."
+      jam -e "DELETE FROM utils.tasks WHERE status='done';"
+      echo "✅ Trash emptied."
+      ;;
+      
+    *)
+      # Default to listing if no command, or help
+      if [ -z "$CMD" ]; then
+        task ls
+      else
+        echo "Usage: task {add <text> | ls | done [id] | clean}"
+      fi
+      ;;
+  esac
+}

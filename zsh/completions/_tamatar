@@ -1,4 +1,4 @@
-#compdef stock kv site basket drop jam pantry
+#compdef stock kv site basket drop jam pantry task
 
 # --- 1. STOCK COMPLETION ---
 _stock() {
@@ -134,6 +134,32 @@ _drop() {
 _jam() { _arguments '1:SQL Query or DB Name' }
 _pantry() { _arguments '1:SQL Query' }
 
+# --- 7. TASK COMPLETION ---
+_task() {
+    local context state state_descr line
+    typeset -A opt_args
+    _arguments -C '1: :->cmds' '*:: :->args'
+
+    case $state in
+        cmds)
+            local -a commands
+            commands=(
+                'add:Add a new task'
+                'ls:List pending tasks'
+                'done:Mark task as completed'
+                'clean:Remove completed tasks'
+            )
+            _describe 'command' commands
+            ;;
+        args)
+            case $line[1] in
+                add) _message "Task Description" ;;
+                done) _message "Task ID (Optional)" ;;
+            esac
+            ;;
+    esac
+}
+
 # Route the completion to the correct function based on the command
 case "$service" in
     stock) _stock ;;
@@ -143,4 +169,5 @@ case "$service" in
     drop) _drop ;;
     jam) _jam ;;
     pantry) _pantry ;;
+    task) _task ;;
 esac
