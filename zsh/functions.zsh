@@ -4,6 +4,11 @@ if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
     source ~/.dotfiles/zsh/oci_functions.zsh
 fi
 
+# --- Load AI Functions
+if [ -f ~/.dotfiles/zsh/ai_functions.zsh ]; then
+    source ~/.dotfiles/zsh/ai_functions.zsh
+fi
+
 # --- Load Other Functions
 if [ -f ~/.dotfiles/zsh/other_functions.zsh ]; then
     source ~/.dotfiles/zsh/other_functions.zsh
