@@ -221,21 +221,72 @@ why() {
 }
 
 # ------------------------------------------
-# 6. GIT COMMIT (gcmt)
+# 6. GIT COMMIT (gcmt) - Gemini Powered
 # ------------------------------------------
-# Purpose: Writes semantic git commit messages from staged changes.
+# Purpose: Writes semantic git commit messages using Gemini 2.5 (High Context).
 gcmt() {
+    # 1. Pre-Flight Checks
     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then echo "❌ Not a git repo."; return 1; fi
     if git diff --cached --quiet; then echo "⚠️  No staged changes."; return 1; fi
 
-    local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 6000)
+    # 2. Credentials
+    local api_key="$GEMINI_API_KEY"
+    if [ -z "$api_key" ] && command -v jam &> /dev/null; then
+        api_key=$(jam -N -B -e "SELECT v FROM utils.secrets WHERE k='GEMINI_API_KEY';" 2>/dev/null)
+    fi
+    if [ -z "$api_key" ]; then echo "❌ Error: GEMINI_API_KEY missing."; return 1; fi
+
+    # 3. Context Gathering (The Upgrade)
+    echo "🤔 Reading staged changes..."
     
-    # We use 'ask' here directly to reuse the API logic, but we parse the output raw
-    # Note: We strip markdown code blocks in case the model adds them
-    local msg=$(echo "$diff_content" | ask -s "You are a senior dev. Write a Semantic Git Commit Message. Format: <type>(<scope>): <subject>. Imperative mood. Output ONLY the raw message string." | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
+    # Get Branch Name (Helps AI infer context)
+    local branch=$(git branch --show-current)
+    
+    # Get Diff - Increased limit to 100k chars (Gemini handles 1M tokens, so this is safe)
+    local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 100000)
 
-    if [ -z "$msg" ]; then return 1; fi
+    # 4. System Prompt
+    local system_prompt="You are a Senior Release Manager. Write a Semantic Git Commit Message.
+    Format: <type>(<scope>): <subject>
+    Rules:
+    - Types: feat, fix, docs, style, refactor, test, chore, ci, perf.
+    - Scope is optional but recommended (based on filenames).
+    - Use Imperative Mood ('Add' not 'Added').
+    - If the diff is huge, focus on the 'Why' and the major 'What'.
+    - Output ONLY the raw commit message string. No markdown, no quotes."
 
+    # 5. JSON Payload
+    # We combine Branch + Diff into the user prompt
+    local json_payload=$(jq -n \
+        --arg sys "$system_prompt" \
+        --arg diff "$diff_content" \
+        --arg branch "$branch" \
+        '{
+          system_instruction: { parts: [{ text: $sys }] },
+          contents: [{ parts: [{ text: ("Current Branch: " + $branch + "\n\nCode Changes:\n" + $diff) }] }]
+        }')
+
+    # 6. Send to Gemini 2.5 Flash
+    echo "♊ Gemini is analyzing changes..."
+    local response=$(curl -s -X POST \
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$api_key" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload")
+
+    # 7. Parse Output
+    local msg=$(printf '%s' "$response" | jq -r '.candidates[0].content.parts[0].text')
+
+    # Cleanup (Strip markdown code blocks if Gemini adds them)
+    msg=$(echo "$msg" | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
+
+    if [ -z "$msg" ] || [ "$msg" = "null" ]; then
+        echo "❌ Failed to generate message."
+        # Debug only if failed
+        printf '%s' "$response" | jq . 2>/dev/null
+        return 1
+    fi
+
+    # 8. Interactive Review
     echo ""
     echo -e "\033[1;32m$msg\033[0m"
     echo -n "🚀 Commit? [y/n/e]: "
@@ -246,7 +297,6 @@ gcmt() {
         *) echo "❌ Aborted." ;;
     esac
 }
-
 
 # ==========================================
 #  GEMINI VISION (gemini-2.5-flash)
