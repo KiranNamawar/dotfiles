@@ -305,3 +305,66 @@ view() {
         echo "❌ No image viewer found."
     fi
 }
+
+
+# ==========================================
+#  FUZZY TEXT SEARCH (Live Grep)
+# ==========================================
+# Usage: ft "search term"
+#        ft "search term" <path>
+#        ft <path>
+ft() {
+    # 1. Check for Ripgrep
+    if ! command -v rg &> /dev/null; then
+        echo "❌ Error: 'rg' (ripgrep) is missing. Install it first."
+        return 1
+    fi
+
+    # 2. Parse Arguments
+    local search_path="."
+    local query=""
+    
+    if [[ -n "$*" ]] && [[ -d "${@[-1]}" ]]; then
+        search_path="${@[-1]}"
+        query="${@[1,-2]}"
+    else
+        query="$*"
+    fi
+
+    # 3. Define Commands
+    # {1} = File, {2} = Line
+    local preview_cmd="bat --style=numbers --color=always --highlight-line {2} {1}"
+    
+    local reload_cmd="rg --column --line-number --no-heading --color=always --smart-case {q} \"$search_path\""
+
+    # 4. Run FZF
+    local selected=$(fzf \
+        --ansi \
+        --disabled \
+        --query "$query" \
+        --height=80% \
+        --layout=reverse \
+        --border \
+        --prompt="🔎 Grep [$search_path] > " \
+        --delimiter : \
+        --preview "$preview_cmd" \
+        --preview-window="right:60%:border-left:+{2}-/2" \
+        --bind "start:reload:$reload_cmd" \
+        --bind "change:reload:$reload_cmd" \
+        --bind "ctrl-r:reload:$reload_cmd" \
+    )
+
+    # 5. Open in Neovim
+    if [[ -n "$selected" ]]; then
+        local file=$(echo "$selected" | cut -d: -f1)
+        local line=$(echo "$selected" | cut -d: -f2)
+        
+        echo "🚀 Opening $file:$line..."
+        nvim "+$line" "$file"
+    fi
+}
+
+# Bind to CTRL+G (Grep)
+_ft_widget() { ft; zle reset-prompt; }
+zle -N _ft_widget
+bindkey '^g' _ft_widget

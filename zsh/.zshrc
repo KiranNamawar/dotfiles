@@ -64,7 +64,7 @@ fi
 eval "$(zoxide init zsh)"
 
 # Aliases
-alias cat="bat"
+alias cat="bat -pP"
 alias ls='lsd --group-directories-first'
 alias ll='lsd -l --group-directories-first'
 alias la='lsd -la --group-directories-first'
