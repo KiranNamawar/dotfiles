@@ -151,7 +151,7 @@ proj() {
     
     # 3. SESSION NAMING
     # "learn/react" -> "learn_react"
-    local session_name=$(echo "$selected" | tr . _ | tr / _)
+    local session_name=$(echo "$selected" | tr . _ | tr / _ | sed s/_$//)
 
     # 4. TMUX LOGIC
     if ! tmux has-session -t="$session_name" 2> /dev/null; then
