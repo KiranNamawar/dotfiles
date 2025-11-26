@@ -1,5 +1,5 @@
 # ==========================================
-#  TAMATAR INTELLIGENCE LAYER (v3.0)
+#  TAMATAR INTELLIGENCE LAYER
 # ==========================================
 # A suite of AI-powered CLI tools for Fedora.
 #
@@ -386,6 +386,237 @@ explain() {
     _render_output "$result"
 }
 
+# ------------------------------------------
+# 14. JSQL (Jam SQL Generator)
+# ------------------------------------------
+# Purpose: Generates strict SQL for MySQL (Jam) based on actual schema.
+# Model: Llama 3.3 70B (Logic)
+# Usage: jsql "show tasks pending"
+#        jsql -d my_app "count active users"
+#        jam -e "$(jsql "delete old logs")"
+jsql() {
+    local target_db="utils"
+    local user_prompt=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--database) target_db="$2"; shift 2 ;;
+            *) user_prompt="$1"; shift ;;
+        esac
+    done
+
+    if [ -z "$user_prompt" ]; then echo "Usage: jsql [-d database] 'query description'"; return 1; fi
+    
+    echo "🧠 Reading schema from '$target_db'..." >&2
+    
+    local query="SELECT CONCAT(TABLE_NAME, ' (', GROUP_CONCAT(COLUMN_NAME SEPARATOR ', '), ')') 
+                 FROM information_schema.COLUMNS 
+                 WHERE TABLE_SCHEMA = '$target_db' 
+                 GROUP BY TABLE_NAME;"
+                 
+    local current_schema=$(jam -N -B -e "$query" 2>/dev/null)
+    
+    if [ -z "$current_schema" ]; then
+        echo "⚠️  Warning: Could not fetch schema. AI will guess." >&2
+        current_schema="[Unknown]"
+    fi
+
+    local sys="You are a MySQL Query Generator.
+    Rules:
+    1. Output ONLY valid SQL. No markdown.
+    2. Use STRICTLY the schema below.
+    3. ALWAYS use fully qualified table names (e.g., '$target_db.tablename').
+    4. Target Database: $target_db
+    5. If the user asks for 'all tables', 'list tables', or 'show tables', output a metadata query (e.g., SHOW TABLES or SELECT FROM information_schema). DO NOT use SELECT *.
+    6. Do NOT use 'UNION' unless tables have identical schema.
+    7. Output a SINGLE executable statement. Do not generate multiple queries.
+
+    [[ SCHEMA ]]
+    $current_schema"
+    
+    local result=$(_call_groq "$sys" "$user_prompt" "llama-3.3-70b-versatile")
+    
+    # Cleanup
+    result=$(echo "$result" | sed 's/^```sql//g' | sed 's/^```//g' | sed 's/```$//g' | awk '{$1=$1};1')
+    
+    echo "$result"
+}
+
+# ------------------------------------------
+# 15. JASK (Generate & Execute SQL)
+# ------------------------------------------
+# Purpose: Generates SQL via AI, confirms with user, then runs it on Jam.
+# Model: Llama 3.3 70B (via jsql)
+# Usage: jask "show 5 newest tasks"
+#        jask -d my_db "count users"
+jask() {
+    # Pass all arguments to jsql to handle flags like -d
+    local sql=$(jsql "$@")
+
+    if [ -z "$sql" ]; then return 1; fi
+
+    # Interactive Review
+    echo ""
+    echo "📜 Generated SQL:"
+    # Print in Yellow for visibility
+    echo -e "\033[1;33m$sql\033[0m"
+    echo ""
+
+    echo -n "🚀 Run on Jam? [y/N] "
+    read -r confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # Check if arguments included a -d flag to pick the right DB for execution
+        # A simple regex check to see if a specific DB was requested in the args
+        # (This is optional optimization, jam usually runs query directly)
+        jam -e "$sql"
+    else
+        echo "❌ Aborted."
+    fi
+}
+
+# ------------------------------------------
+# 15. JQ GENERATOR (jqg)
+# ------------------------------------------
+# Purpose: Generates complex JQ filters from natural language.
+# Model: Llama 3.3 70B (Logic)
+# Usage: jqg "get all values of key 'id'"
+#        head -n 20 data.json | jqg "extract users with role admin"
+jqg() {
+    local goal="$*"
+    local json_context=""
+
+    # 1. Check for Piped Input (Context)
+    # If user pipes data, we read the first 20 lines to understand the schema
+    if [ ! -t 0 ]; then
+        json_context=$(head -n 20)
+    fi
+
+    if [ -z "$goal" ]; then
+        echo "Usage: jqg 'description of filter'"
+        echo "Tip: Pipe JSON sample for better accuracy: head file.json | jqg '...'"
+        return 1
+    fi
+
+    # 2. Construct System Prompt
+    local sys="You are a JQ Filter Generator.
+    Rules:
+    1. Output ONLY the raw jq filter string.
+    2. No markdown (no \`\`\`), no quotes, no explanations.
+    3. If JSON context is provided, use specific key names.
+    4. If context is missing, infer standard keys."
+
+    local user_prompt="Goal: $goal"
+    if [ -n "$json_context" ]; then
+        user_prompt="$user_prompt\n\nJSON Sample:\n$json_context"
+    fi
+
+    # 3. Call Groq 70B
+    local result=$(_call_groq "$sys" "$user_prompt" "llama-3.3-70b-versatile")
+    
+    # 4. Cleanup Output
+    result=$(echo "$result" | sed 's/^```jq//g' | sed 's/^```//g' | sed 's/```$//g' | awk '{$1=$1};1')
+    
+    echo "$result"
+}
+
+# ------------------------------------------
+# 16. JQA (Generate & Apply JQ)
+# ------------------------------------------
+# Purpose: Pipes JSON, asks AI for a filter, and executes it immediately.
+# Usage: cat file.json | jqa "get all users"
+#        curl api | jqa "extract only the id and status"
+jqa() {
+    local goal="$1"
+    if [ -z "$goal" ]; then echo "Usage: cat file.json | jqa 'filter description'"; return 1; fi
+    
+    # 1. Buffer Input
+    # We need the data twice: once for context (head) and once for execution (jq)
+    local tmp_file=$(mktemp /tmp/jqa_XXXXXX.json)
+    cat > "$tmp_file"
+    
+    # Safety check: is it valid JSON?
+    if ! jq empty "$tmp_file" 2>/dev/null; then
+        echo "❌ Error: Input is not valid JSON." >&2
+        rm "$tmp_file"
+        return 1
+    fi
+
+    # 2. Generate Filter
+    # We pipe the first 20 lines to your existing 'jqg' function to get the smart filter
+    local filter=$(head -n 20 "$tmp_file" | jqg "$goal")
+    
+    if [ -z "$filter" ]; then 
+        echo "❌ Failed to generate filter." >&2
+        rm "$tmp_file"
+        return 1 
+    fi
+
+    # 3. Feedback (Stderr so it doesn't break pipes)
+    echo "🔍 Filter: $filter" >&2
+
+    # 4. Execute
+    jq "$filter" "$tmp_file"
+    
+    # Cleanup
+    rm "$tmp_file"
+}
+
+# ------------------------------------------
+# 17. SEARCH (Smart Polyglot Finder)
+# ------------------------------------------
+search() {
+    local description="$*"
+    if [ -z "$description" ]; then echo "Usage: search 'description'"; return 1; fi
+
+    local sys="You are a Command Line Search Expert.
+    Task: Translate the request into a single 'fd' or 'rg' command.
+    Rules:
+    1. If searching for **File Names** or attributes, use 'fd'.
+    2. If searching for **Text Content** inside files, use 'rg -l' (list filenames only).
+    3. Do NOT use 'find', '-exec', or 'xargs'. Use only standalone 'fd' or 'rg' flags.
+    4. Target the CURRENT DIRECTORY ('.') unless a path is explicitly requested.
+    5. Output ONLY the raw command string."
+
+    local cmd=$(_call_groq "$sys" "Find: $description" "llama-3.3-70b-versatile")
+    cmd=$(echo "$cmd" | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
+
+    if [ -z "$cmd" ]; then echo "❌ Failed."; return 1; fi
+    echo "🤖 Command: $cmd" >&2
+    
+    local preview_cmd="if [ -d {} ]; then 
+        lsd --tree --depth 1 --color always --icon always {}; 
+    else 
+        bat --style=numbers --color=always --line-range :500 {} 2>/dev/null || cat {}; 
+    fi"
+
+    # Capture output into array
+    local -a out
+    out=("${(@f)$(eval "$cmd" | fzf \
+        --layout=reverse --border --height=80% \
+        --prompt="🕵️  Search > " \
+        --header="ENTER: Smart | ^O: GUI | ^Y: Copy | M-c: CD" \
+        --preview="$preview_cmd" --preview-window="right:60%:wrap" \
+        --expect="ctrl-o,ctrl-y,alt-c")}")
+
+    local key="${out[1]}"
+    local selected="${out[2]}"
+
+    if [[ -z "$selected" ]]; then return; fi
+
+    case "$key" in
+        ctrl-o) xdg-open "$selected" >/dev/null 2>&1 ;;
+        ctrl-y) echo -n "$(readlink -f "$selected")" | (command -v wl-copy &>/dev/null && wl-copy || xclip -selection clipboard) ;;
+        alt-c)  
+            local target="$selected"
+            if [[ -f "$target" ]]; then target=$(dirname "$target"); fi
+            cd "$target" ;;
+        *)
+            if [[ -d "$selected" ]]; then cd "$selected"; 
+            elif [[ -f "$selected" ]]; then echo "📝 Editing..."; nvim "$selected"; fi 
+            ;;
+    esac
+}
+
 
 # ==========================================
 #  AI LAUNCHER (The Master Menu)
@@ -410,6 +641,11 @@ ai() {
         "rx:Generate Regex Patterns (Groq 70B)"
         "pick:Extract Data from Messy Text (Groq 70B)"
         "explain:Explain Code/Commands (Groq 70B)"
+        "jsql:Generate MySQL Queries (Groq 70B)"
+        "jask:Generate & Run MySQL Query (Interactive)"
+        "jqg:Generate JQ Filter (Groq 70B)"
+        "jqa:Generate & Apply JQ Filter"
+        "search:AI File Finder (Groq 70B)"
     )
 
     # 3. Run FZF with File-Based Preview

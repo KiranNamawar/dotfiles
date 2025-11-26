@@ -368,3 +368,66 @@ ft() {
 _ft_widget() { ft; zle reset-prompt; }
 zle -N _ft_widget
 bindkey '^g' _ft_widget
+
+
+# ==========================================
+#  THE UNIVERSAL FINDER (ff) - Fixed
+# ==========================================
+ff() {
+    local source_cmd
+    if command -v fd &> /dev/null; then
+        source_cmd="fd --hidden --follow --exclude .git --exclude node_modules"
+    else
+        source_cmd="find . -maxdepth 5 -not -path '*/.*'"
+    fi
+
+    local preview_cmd="if [ -d {} ]; then 
+        lsd --tree --depth 1 --color always --icon always {}; 
+    else 
+        bat --style=numbers --color=always --line-range :500 {} 2>/dev/null || cat {}; 
+    fi"
+
+    local -a out
+    out=("${(@f)$(eval "$source_cmd" | fzf \
+        --layout=reverse --border --height=80% \
+        --prompt="🚀 Find > " \
+        --header="ENTER: Smart | ^O: GUI | ^Y: Copy | M-c: CD" \
+        --preview="$preview_cmd" --preview-window="right:60%:wrap" \
+        --expect="ctrl-o,ctrl-y,alt-c")}")
+
+    # Line 1 is the key press (or empty for Enter)
+    local key="${out[1]}"
+    # Line 2 is the selected item
+    local selected="${out[2]}"
+
+    if [[ -z "$selected" ]]; then return; fi
+
+    case "$key" in
+        ctrl-o)
+            xdg-open "$selected" >/dev/null 2>&1
+            echo "🖼️  Opened: $selected"
+            ;;
+        ctrl-y)
+            echo -n "$(readlink -f "$selected")" | (command -v wl-copy &>/dev/null && wl-copy || xclip -selection clipboard)
+            echo "📋 Copied path."
+            ;;
+        alt-c)
+            local target="$selected"
+            if [[ -f "$target" ]]; then target=$(dirname "$target"); fi
+            cd "$target"
+            ;;
+        *)
+            if [[ -d "$selected" ]]; then
+                cd "$selected"
+            elif [[ -f "$selected" ]]; then
+                echo "📝 Editing..."
+                nvim "$selected"
+            fi
+            ;;
+    esac
+}
+
+# Widget
+_ff_widget() { ff; zle reset-prompt; }
+zle -N _ff_widget
+bindkey '^p' _ff_widget

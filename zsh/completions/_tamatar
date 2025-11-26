@@ -1,4 +1,4 @@
-#compdef stock kv site basket drop jam pantry task buckets vault
+#compdef stock kv site basket drop jam pantry task buckets vault jsql jask jqg jqa
 
 # --- 1. STOCK COMPLETION ---
 _stock() {
@@ -242,6 +242,24 @@ _vault() {
     esac
 }
 
+# --- 10. JSQL COMPLETION ---
+_jsql() {
+    _arguments \
+        '1:Query Description:( )' \
+        '-d[Database Name]:Database:_databases'
+}
+# Helper to fetch databases for completion
+_databases() {
+    local -a dbs
+    dbs=(${(f)"$(jam -N -B -e 'SHOW DATABASES;' 2>/dev/null)"})
+    _describe 'databases' dbs
+}
+
+# --- 11. JQG COMPLETION ---
+_jqg() {
+    _arguments '1:Filter Description:( )'
+}
+
 # Route the completion to the correct function based on the command
 case "$service" in
     stock) _stock ;;
@@ -254,4 +272,8 @@ case "$service" in
     task) _task ;;
     buckets) _buckets ;;
     vault) _vault ;;
+    jsql) _jsql ;;
+    jask) _jsql ;;
+    jqg) _jqg ;;
+    jqa) _jqg ;;
 esac
