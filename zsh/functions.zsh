@@ -1,14 +1,4 @@
 
-# --- Load OCI Functions
-if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
-    source ~/.dotfiles/zsh/oci_functions.zsh
-fi
-
-# --- Load AI Functions
-if [ -f ~/.dotfiles/zsh/ai_functions.zsh ]; then
-    source ~/.dotfiles/zsh/ai_functions.zsh
-fi
-
 # --- Load Other Functions
 if [ -f ~/.dotfiles/zsh/other_functions.zsh ]; then
     source ~/.dotfiles/zsh/other_functions.zsh
@@ -22,57 +12,38 @@ fi
 jqe() {
   local INPUT_FILE=$(mktemp /tmp/jqe_XXXXXX.json)
   
-  # 1. Input Handling: Pipe or File argument?
+  # Ensure cleanup happens on EXIT, INT (Ctrl+C), or TERM
+  trap 'rm -f "$INPUT_FILE"' EXIT INT TERM
+
+  # 1. Input Handling
   if [ -f "$1" ]; then
     cat "$1" > "$INPUT_FILE"
+  elif [ -t 0 ]; then
+    echo "Usage: jqe <file> OR command | jqe"
+    return 1
   else
-    # Read from Stdin (Piped input)
-    # If stdin is empty, show usage
-    if [ -t 0 ]; then
-      echo "Usage: jqe <file> OR command | jqe"
-      rm "$INPUT_FILE"
-      return 1
-    fi
     cat > "$INPUT_FILE"
   fi
 
-  # 2. Check validity
+  # 2. Validity Check
   if ! jq empty "$INPUT_FILE" 2>/dev/null; then
-    echo "❌ Error: Invalid JSON input."
-    rm "$INPUT_FILE"
+    echo "❌ Error: Invalid JSON."
     return 1
   fi
 
-  # 3. The Explorer Logic
-  # We use JQ to generate a list of ALL paths (e.g. .user.name, .list[0].id)
-  # Then feed that list to FZF
-  local SELECTED_PATH=$(jq -r '
-    paths 
-    | map(if type=="number" then "["+tostring+"]" else "[\""+tostring+"\"]" end) 
-    | join("") 
-    | "." + .' "$INPUT_FILE" \
-    | fzf --height 60% --layout=reverse --border \
-          --header="JSON Explorer (Type to filter paths)" \
-          --preview "jq -C {1} $INPUT_FILE" \
-          --preview-window='right:60%:wrap')
+  # 3. Explorer (Same as before)
+  local SELECTED_PATH=$(jq -r 'paths | map(if type=="number" then "["+tostring+"]" else "[\""+tostring+"\"]" end) | join("") | "." + .' "$INPUT_FILE" \
+    | fzf --height 60% --layout=reverse --border --header="JSON Explorer" --preview "jq -C {1} $INPUT_FILE")
 
-  # 4. Cleanup & Output
+  # 4. Output
   if [ -n "$SELECTED_PATH" ]; then
-    # Extract the value at the selected path
     local VALUE=$(jq -r "$SELECTED_PATH" "$INPUT_FILE")
-    
-    # Copy to clipboard
-    if command -v wl-copy &> /dev/null; then echo -n "$VALUE" | wl-copy
-    elif command -v xclip &> /dev/null; then echo -n "$VALUE" | xclip -selection clipboard; fi
-    
+    if command -v wl-copy &> /dev/null; then echo -n "$VALUE" | wl-copy; fi
     echo "✅ Copied: $SELECTED_PATH"
-    # Print value to stdout so it can be chained (e.g. jqe file | less)
     echo "$VALUE"
   fi
-
-  rm "$INPUT_FILE"
+  # Trap handles rm "$INPUT_FILE" automatically
 }
-
 
 # ------------------------------------------
 # FUZZY CD (lsd edition)
@@ -430,4 +401,44 @@ ff() {
 # Widget
 _ff_widget() { ff; zle reset-prompt; }
 zle -N _ff_widget
-bindkey '^p' _ff_widget
+bindkey '^f' _ff_widget
+
+
+# ==========================================
+#  UTIL LAUNCHER (Local Productivity)
+# ==========================================
+# Usage: util
+util() {
+    # 1. DYNAMICALLY LOCATE THIS FILE
+    local UTIL_LIB="${(%):-%x}"
+    if [ -z "$UTIL_LIB" ]; then UTIL_LIB="${BASH_SOURCE[0]}"; fi
+
+    # 2. Define the menu
+    local tools=(
+        "ff:Universal Finder (Files/Dirs)"
+        "ft:Live Grep (Text Search)"
+        "proj:Project Sessionizer (Tmux)"
+        "fop:Fuzzy Open (Nvim)"
+        "fcd:Fuzzy CD (Navigation)"
+        "jqe:JSON Query Explorer"
+        "view:Smart Image Viewer"
+        "tkill:Tmux Session Killer"
+    )
+
+    # 3. Run FZF with 'awk' Paragraph Preview
+    # Scans THIS file for the function comments
+    local selected=$(printf "%s\n" "${tools[@]}" | column -t -s ":" | fzf \
+        --height=50% \
+        --layout=reverse \
+        --border \
+        --header="⚡ Tamatar Local Utilities" \
+        --prompt="util > " \
+        --preview="awk -v func_name={1} 'BEGIN{RS=\"\"} \$0 ~ (\"(^|\\n)\" func_name \"\\\\(\\\\)\") {print}' $UTIL_LIB | bat -l bash --color=always --style=numbers" \
+        --preview-window="right:60%:wrap" \
+        | awk '{print $1}')
+
+    # 4. Push to Buffer
+    if [[ -n "$selected" ]]; then
+        print -z "$selected "
+    fi
+}
