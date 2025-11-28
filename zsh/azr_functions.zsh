@@ -250,7 +250,6 @@ hey() {
   # 0. INTERCEPT "STOP" / "SHUTUP"
   if [[ "$1" == "stop" || "$1" == "shutup" || "$1" == "quiet" ]]; then
       echo "🤫 Silencing..."
-      # Kill both potential players
       pkill mpv 2>/dev/null
       pkill paplay 2>/dev/null
       return
@@ -258,28 +257,18 @@ hey() {
 
   local OUTPUT=""
 
-  # 1. HANDLE INPUT SOURCE
+  # --- Input Handling Logic ---
   if [ -n "$1" ]; then
-      # --- ARGUMENTS PROVIDED ---
-      
-      # Is it a known command? (e.g. 'research', 'why', 'date')
       if command -v "$1" &>/dev/null; then
-         # Run command (Inherits Stdin automatically!)
          echo "🤔 Running '$1'..."
          OUTPUT=$("$@")
       else
-         # It's not a command, so it's a question for 'ask'
          echo "🤔 Asking AI..."
          OUTPUT=$(ask "$*")
       fi
-      
   elif [ ! -t 0 ]; then
-      # --- PIPED INPUT ONLY (No Args) ---
-      # Example: echo "Hello" | hey
-      # Just capture the text to speak it
       OUTPUT=$(cat)
   else
-      # --- NOTHING PROVIDED ---
       echo "Usage: hey <command> [args] OR pipe | hey [command]"
       return 1
   fi
@@ -290,9 +279,9 @@ hey() {
     return 1
   fi
 
-  # 3. VISUAL OUTPUT (Pretty Print)
+  # 3. VISUAL OUTPUT
   if command -v glow &>/dev/null; then
-      echo "$OUTPUT" | glow -p -
+      echo "$OUTPUT" | glow -
   else
       echo "$OUTPUT"
   fi
@@ -300,7 +289,6 @@ hey() {
   # 4. AUDIO OUTPUT (Streaming Voice)
   echo "$OUTPUT" | say
 }
-
 
 # ------------------------------------------
 # SKY LAUNCHER
