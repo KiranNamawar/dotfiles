@@ -67,8 +67,15 @@ if [ -f ~/.dotfiles/zsh/functions.zsh ]; then
     source ~/.dotfiles/zsh/functions.zsh
 fi
 
-# Dashboard Alias
-alias tmt='echo -e "\n🍅 \033[1;31mTAMATAR OS\033[0m"; echo -e "  ☁️  oi    :: Cloud Infrastructure (OCI)"; echo -e "  ✈️  sky   :: Sky Infrastructure (Azure)"; echo -e "  🧠  ai    :: Intelligence"; echo -e "  ⚡  util  :: Local Utilities\n"'
+# ==========================================
+#  THE KITCHEN (Unified Dashboard)
+# ==========================================
+if [ -f ~/.dotfiles/zsh/kitchen.zsh ]; then
+    source ~/.dotfiles/zsh/kitchen.zsh
+fi
+
+# Bind to CTRL+k
+bindkey '^k' kit
 
 
 # ==========================================

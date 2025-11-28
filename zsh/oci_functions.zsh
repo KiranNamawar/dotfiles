@@ -43,26 +43,82 @@ basket() {
   local REMOTE="oracle:basket"
 
   case "$CMD" in
-    ls)   echo "📂 Listing Basket..."; rclone lsl "$REMOTE" ;;
-    push) rclone copy "$2" "$REMOTE/" -P; echo "⬆️ Uploaded '$2'" ;;
-    rm)   rclone delete "$REMOTE/$2" -P; echo "🗑️ Deleted '$2'" ;;
+    ls)   
+      echo "📂 Listing Basket..."
+      # --format "tsp": Time, Size, Path
+      # -h: Human readable sizes (e.g., 44 B, 1.2 MB)
+      # sed: Trims the seconds slightly for cleaner look if needed, but standard format is okay.
+      # awk: Adds colors (Blue for time, Yellow for size, White for file)
+      rclone lsf "$REMOTE" --format "tsp" --separator "|" | \
+      sort -r | \
+      numfmt --to=iec-i --suffix=B --delimiter="|" --field=2 | \
+      awk -F "|" '{
+         # Clean Time: Split by "." to remove nanoseconds
+         split($1, t, ".");
+         
+         # Print: Blue Time | Yellow Size | White Name
+         printf "\033[1;34m%s\033[0m  \033[1;33m%9s\033[0m  %s\n", t[1], $2, $3
+      }'
+      ;;
+    push) 
+      local file="$2"
+      if [ -z "$file" ]; then echo "Usage: basket push <file>"; return 1; fi
+      
+      # Safety Check: Does it exist remotely?
+      if [[ -n $(rclone lsf "$REMOTE/$file" 2>/dev/null) ]]; then
+         echo -n "⚠️  File exists in basket. Overwrite? [y/N] "
+         read -r confirm
+         [[ "$confirm" != "y" ]] && echo "❌ Aborted." && return
+      fi
+      
+      echo "⬆️  Uploading..."
+      # Integrate Notify + Time the upload
+      time rclone copy "$file" "$REMOTE/" -P && notify -T "arrow_up" --title "Basket" "Uploaded: $file"
+      ;;
     pull)
       local TARGET="$2"
       if [ -z "$TARGET" ]; then
-        TARGET=$(rclone lsf "$REMOTE" -R --files-only | fzf --height 40% --layout=reverse --border)
+        # Improved Preview: Show file size and time
+        TARGET=$(rclone lsl "$REMOTE" | fzf --height 40% --layout=reverse --border --header="⬇️  Pull from Basket" | awk '{print $NF}')
         [ -z "$TARGET" ] && return
       fi
-      rclone copy "$REMOTE/$TARGET" . -P
+      rclone copy "$REMOTE/$TARGET" . -P && notify "✅ Basket: Pulled $TARGET"
+      ;;
+    rm)
+      local file="$2"
+      if [ -z "$file" ]; then echo "Usage: basket rm <file>"; return 1; fi
+
+      # 1. Check if file actually exists
+      if [[ -z $(rclone lsf "$REMOTE/$file" 2>/dev/null) ]]; then
+         echo "❌ Error: File '$file' not found in basket."
+         return 1
+      fi
+
+      echo "🗑️  Deleting '$file'..."
+      rclone delete "$REMOTE/$file" -P && echo "✅ Deleted."
       ;;
     link)
-      echo "🔗 Generating Link for '$2'..."
-      local EXPIRY=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)
-      local PAR_PATH=$(oci os preauth-request create --namespace $OCI_NS --bucket-name basket --name "share_$(date +%s)" --object-name "$2" --access-type ObjectRead --time-expires "$EXPIRY" --query "data.\"access-uri\"" --raw-output)
+      local file="$2"
+      local time="${3:-1d}" # Default to 1 day, but allow '1h', '1w'
+      
+      # Convert 1d -> 24h for simple math if needed, but 'date' handles +1 day/week fine.
+      # We need to map 1d/1h to 'date' format. 
+      # Simpler: Just rely on user passing valid date string OR default
+      local expiry_str="+1 day"
+      if [[ "$time" == *"h"* ]]; then expiry_str="+${time//h/} hour"; fi
+      if [[ "$time" == *"d"* ]]; then expiry_str="+${time//d/} day"; fi
+      if [[ "$time" == *"w"* ]]; then expiry_str="+${time//w/} week"; fi
+
+      echo "🔗 Generating Link (Expires: $expiry_str)..."
+      local EXPIRY=$(date -u -d "$expiry_str" +%Y-%m-%dT%H:%M:%SZ)
+      
+      local PAR_PATH=$(oci os preauth-request create --namespace $OCI_NS --bucket-name basket --name "share_$(date +%s)" --object-name "$file" --access-type ObjectRead --time-expires "$EXPIRY" --query "data.\"access-uri\"" --raw-output)
+      
       local FULL_URL="https://objectstorage.${OCI_REGION}.oraclecloud.com${PAR_PATH}"
       _copy_to_clip "$FULL_URL"
       echo "✅ Copied: $FULL_URL"
       ;;
-    *) echo "Usage: basket {ls | push | pull | rm | link}" ;;
+    *) echo "Usage: basket {ls | push <file> | pull | rm | link <file> [1h/1d/1w]}" ;;
   esac
 }
 
