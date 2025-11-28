@@ -390,43 +390,45 @@ buckets() {
     *) echo "Usage: buckets {ls | mk | rm | sync | nuke}" ;;
   esac
 }
-    # ------------------------------------------
-    # 5. JAM (MySQL HeatWave)
-    # ------------------------------------------
-    # Purpose: Connects to internal MySQL instance via Tailscale.
-    # Usage:   jam <database> [sql_command]
-    jam() {
-        [ -z "$JAM_PASS" ] && echo "⚠️ Env var JAM_PASS missing" && return 1
-        local DB="$1"; [ -n "$DB" ] && shift
-        MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$DB" "$@"
-    }
 
-    # ------------------------------------------
-    # 6. PANTRY (Autonomous DB)
-    # ------------------------------------------
-    # Purpose: Connects to Oracle ATP via SQLcl or Mongosh.
-    # Usage:   pantry       (Interactive SQL)
-    #          pantry "sql" (One-off)
-    pantry() {
-        [ -z "$TNS_ADMIN" ] && export TNS_ADMIN="$HOME/.oci/wallet"
-        [ -z "$PANTRY_PASSWORD" ] && source ~/.oci/.secrets
-        if [ -n "$1" ]; then
-            sql -L /nolog <<EOF
+
+# ------------------------------------------
+# 5. JAM (MySQL HeatWave)
+# ------------------------------------------
+# Purpose: Connects to internal MySQL instance via Tailscale.
+# Usage:   jam <database> [sql_command]
+jam() {
+  [ -z "$JAM_PASS" ] && echo "⚠️ Env var JAM_PASS missing" && return 1
+  local DB="$1"; [ -n "$DB" ] && shift
+  MYSQL_PWD="$JAM_PASS" mysql -h 10.0.1.57 -u admin "$DB" "$@"
+}
+
+# ------------------------------------------
+# 6. PANTRY (Autonomous DB)
+# ------------------------------------------
+# Purpose: Connects to Oracle ATP via SQLcl or Mongosh.
+# Usage:   pantry       (Interactive SQL)
+#          pantry "sql" (One-off)
+pantry() {
+  [ -z "$TNS_ADMIN" ] && export TNS_ADMIN="$HOME/.oci/wallet"
+  [ -z "$PANTRY_PASSWORD" ] && source ~/.oci/.secrets
+  if [ -n "$1" ]; then
+    sql -L /nolog <<EOF
 connect ADMIN/"$PANTRY_PASSWORD"@pantry_high
 set sqlformat ansiconsole;
 $1
 EXIT;
 EOF
-        else
-            sql ADMIN/"$PANTRY_PASSWORD"@pantry_high
-        fi
-    }
+else
+  sql ADMIN/"$PANTRY_PASSWORD"@pantry_high
+  fi
+}
 
-    # ------------------------------------------
-    # 7. PANTRY-SH (Direct MongoDB Connection)
-    # ------------------------------------------
-    # Dependency for 'stock' function
-    pantrysh() {
+# ------------------------------------------
+# 7. PANTRY-SH (Direct MongoDB Connection)
+# ------------------------------------------
+# Dependency for 'stock' function
+pantrysh() {
         if [ -z "$PANTRY_PASSWORD" ] || [ -z "$PANTRY_HOST" ]; then
             [ -f ~/.oci/.secrets.sh ] && source ~/.oci/.secrets.sh
         fi
@@ -443,62 +445,260 @@ EOF
         mongosh "mongodb://ADMIN:$PASS@$PANTRY_HOST/ADMIN?authMechanism=PLAIN&authSource=\$external&ssl=true&retryWrites=false&loadBalanced=true" "$@"
     }
 
-    # ------------------------------------------
-    # 8. KV (Key-Value Store)
-    # ------------------------------------------
-    # Purpose: Persistent string storage in MySQL.
-    # Usage:   kv set <key> <val>
-    #          kv get <key>
-    #          kv ls  (FZF Menu)
-    kv() {
-        local CMD=$1; local KEY=$2; local VAL=$3
-        _esc() { echo "${1//\'/\'\'}"; }
-        case "$CMD" in
-            set) jam -e "INSERT INTO utils.store (k,v) VALUES ('$(_esc "$KEY")','$(_esc "$VAL")') ON DUPLICATE KEY UPDATE v='$(_esc "$VAL")';" ;;
-            get) jam -N -B -e "SELECT v FROM utils.store WHERE k='$(_esc "$KEY")';" ;;
-            rm)  jam -e "DELETE FROM utils.store WHERE k='$(_esc "$KEY")';" ;;
-            ls)
-                local DATA=$(jam -N -B -e "SELECT k, v FROM utils.store ORDER BY k;")
-                if command -v fzf &>/dev/null; then
-                    echo "$DATA" | fzf --height 40% --layout=reverse --border --delimiter=$'\t' --with-nth=1 --preview='echo -e {2}' | cut -f2 | _copy_to_clip
-            else echo "$DATA"; fi ;;
-            *) echo "Usage: kv {set | get | ls | rm}" ;;
-        esac
-    }
+# ------------------------------------------
+# 8. KV (Key-Value Store)
+# ------------------------------------------
+# Purpose: Persistent string storage in MySQL.
+# Usage:   kv set <key> <val>
+#          kv get <key>
+#          kv ls  (FZF Menu)
+kv() {
+    local CMD=$1
+    local KEY=$2
+    
+    # Helper to escape single quotes for SQL
+    _esc() { echo "${1//\'/\'\'}"; }
 
-    # ------------------------------------------
-    # 9. STOCK (JSON Store)
-    # ------------------------------------------
-    # Purpose: NoSQL Document storage via Oracle MongoDB API.
-    # Usage:   stock set <key> <json|@file>
-    #          stock get <key>
-    #          stock ls
-    stock() {
-        local CMD=$1; local KEY=$2
-        case "$CMD" in
-            ls) pantrysh --quiet --eval "db.getSiblingDB('utils').stock.find({},{_id:1}).forEach(d => print(d._id))" ;;
-            get) pantrysh --quiet --eval "EJSON.stringify(db.getSiblingDB('utils').stock.findOne({_id:'$KEY'}))" | jq . ;;
-            *) echo "Usage: stock {set | get | ls}" ;;
-        esac
-    }
+    case "$CMD" in
+        set)
+            local VAL=$3
+            [ -z "$VAL" ] && echo "Usage: kv set <key> <value>" && return 1
+            jam -e "INSERT INTO utils.store (k,v) VALUES ('$(_esc "$KEY")','$(_esc "$VAL")') ON DUPLICATE KEY UPDATE v='$(_esc "$VAL")';"
+            echo "✅ Set '$KEY'."
+            ;;
+        get)
+            [ -z "$KEY" ] && echo "Usage: kv get <key>" && return 1
+            jam -N -B -e "SELECT v FROM utils.store WHERE k='$(_esc "$KEY")';"
+            ;;
+        rm)
+            [ -z "$KEY" ] && echo "Usage: kv rm <key>" && return 1
+            jam -e "DELETE FROM utils.store WHERE k='$(_esc "$KEY")';" && echo "🗑️ Deleted."
+            ;;
+        ls)
+          # 1. Fetch Raw Data (Tab Separated)
+          local DATA=$(jam -N -B -e "SELECT k, v FROM utils.store ORDER BY k ASC;")
+          if command -v fzf &> /dev/null; then
+            local SELECTED=$(echo "$DATA" | fzf \
+              --height 40% \
+              --layout=reverse \
+              --border \
+              --header="Select a Key to Copy Value" \
+              --delimiter=$'\t' \
+              --with-nth=1 \
+              --preview='echo -e {2}' \
+              --preview-window='right:50%:wrap')
+            if [ -n "$SELECTED" ]; then
+              # 3. Extract Value correctly (Handles spaces in value)
+              # Cut field 2 onwards based on tab delimiter
+              local VALUE=$(echo "$SELECTED" | cut -f2)
+              # 4. Copy to Clipboard
+              _copy_to_clip "$VALUE"
+              # Visual confirmation
+              local KEY_NAME=$(echo "$SELECTED" | cut -f1)
+              echo "✅ Copied value for '$KEY_NAME'"
+            fi
+          else
+            # Fallback if no FZF
+            echo "$DATA" | column -t -s $'\t'
+          fi
+        ;;
+        *) echo "Usage: kv {set | get | ls | rm}" ;;
+    esac
+}
 
-    # ------------------------------------------
-    # 10 . TASK (Todo List)
-    # ------------------------------------------
-    # Purpose: Simple CLI task manager backed by MySQL.
-    # Usage:   task add "Buy Milk"
-    #          task ls
-    #          task done <id>
-    task() {
-        local CMD=$1; local ARG="${@:2}"
-        case "$CMD" in
-            add) jam -e "INSERT INTO utils.tasks (content) VALUES ('${ARG//\'/\'\'}');"; echo "✅ Added." ;;
-            ls)  jam -N -B -e "SELECT id, content FROM utils.tasks WHERE status='pending' ORDER BY id DESC;" | column -t -s $'\t' ;;
-        done)
+# ------------------------------------------
+# 9. STOCK (JSON Store)
+# ------------------------------------------
+# Purpose: NoSQL Document storage via Oracle MongoDB API.
+# Usage:   stock set <key> <json|@file>
+#          stock get <key>
+#          stock ls
+stock() {
+  local CMD=$1
+  local FULL_KEY=$2
+  local INPUT_VAL=$3
+
+  _mongo_exec() {
+    pantrysh --quiet --eval "$1"
+  }
+
+  _parse_key() {
+    if [[ "$FULL_KEY" == *.* ]]; then
+      DOC_ID="${FULL_KEY%%.*}"
+      DOC_PATH="${FULL_KEY#*.}"
+    else
+      DOC_ID="$FULL_KEY"
+      DOC_PATH="v"
+    fi
+  }
+
+  case "$CMD" in
+    set)
+      if [ -z "$FULL_KEY" ] || [ -z "$INPUT_VAL" ]; then echo "Usage: stock set <key.path> <value|@file>"; return 1; fi
+      
+      if [[ "$INPUT_VAL" == @* ]]; then
+        local FILE_PATH="${INPUT_VAL#@}"
+        if [ ! -f "$FILE_PATH" ]; then echo "❌ File '$FILE_PATH' not found."; return 1; fi
+        INPUT_VAL=$(cat "$FILE_PATH")
+      fi
+
+      _parse_key 
+      echo "📦 Stocking '$DOC_PATH' into '$DOC_ID'..." >&2
+
+      local B64_VAL=$(echo -n "$INPUT_VAL" | base64 | tr -d '\n')
+
+      local OUT=$(_mongo_exec "
+        var valString = Buffer.from('$B64_VAL', 'base64').toString('utf-8');
+        var finalVal = valString;
+        try { finalVal = JSON.parse(valString); } catch(e) {}
+        
+        db.getSiblingDB('utils').stock.updateOne(
+          {_id: '$DOC_ID'}, 
+          {\$set: { '$DOC_PATH': finalVal, updated: new Date() }}, 
+          {upsert: true}
+        )
+      ")
+      
+      if [[ "$OUT" == *"acknowledged"* ]]; then
+        echo "✅ Stocked: [$FULL_KEY]"
+      else
+        echo "❌ Failed: $OUT"
+        return 1
+      fi
+      ;;
+
+    get)
+      # Auto-Select (Menu)
+      if [ -z "$FULL_KEY" ]; then
+         stock ls
+         return
+      fi
+
+      local FILTER="$3"
+
+      # Fetch Data
+      if [[ "$FULL_KEY" == *.* ]]; then
+        _parse_key
+        local JS_QUERY="
+          var doc = db.getSiblingDB('utils').stock.findOne({_id: '$DOC_ID'});
+          if(!doc) print('NULL');
+          else {
+            var path = '$DOC_PATH'.split('.');
+            var res = doc;
+            for(var i=0; i<path.length; i++) {
+               if(res === undefined || res === null) break;
+               res = res[path[i]];
+            }
+            if(res === undefined) print('NULL');
+            else if(typeof res === 'object') print(JSON.stringify(res));
+            else print(res);
+          }
+        "
+      else
+        local JS_QUERY="
+           var doc = db.getSiblingDB('utils').stock.findOne({_id: '$FULL_KEY'}); 
+           if(!doc) print('NULL'); 
+           else { delete doc._id; delete doc.updated; print(JSON.stringify(doc)); }
+        "
+      fi
+
+      local RESULT=$(_mongo_exec "$JS_QUERY")
+
+      if [[ "$RESULT" == *"NULL"* ]] || [[ -z "$RESULT" ]]; then
+        echo "❌ '$FULL_KEY' not found." >&2
+        return 1
+      fi
+
+      # --- INTEGRATION: If no filter, use JQE ---
+      if [ -z "$FILTER" ]; then
+         # Check if it looks like a JSON object/array
+         if [[ "$RESULT" == \{* ]] || [[ "$RESULT" == \[* ]]; then
+            echo "$RESULT" | jqe
+         else
+            echo "$RESULT" # It's just a string/number
+         fi
+      else
+         echo "$RESULT" | jq -r "$FILTER" 2>/dev/null
+      fi
+      ;;
+
+    ls)
+      local DATA=$(_mongo_exec "db.getSiblingDB('utils').stock.find({}).forEach(doc => { 
+          var id = doc._id; 
+          delete doc._id; delete doc.updated; 
+          print(id + '\t' + Buffer.from(JSON.stringify(doc)).toString('base64')) 
+      })")
+      
+      if command -v fzf &> /dev/null; then
+        local SELECTED=$(echo "$DATA" | fzf \
+            --height 40% --layout=reverse --border --header="Select Stock Item" \
+            --delimiter=$'\t' --with-nth=1 \
+            --preview='echo {2} | base64 --decode | jq .' \
+            --preview-window='right:60%:wrap')
+
+        if [ -n "$SELECTED" ]; then
+           local KEY=$(echo "$SELECTED" | cut -f1)
+           # If selected, run 'stock get' on it to trigger the JQE explorer
+           stock get "$KEY"
+        fi
+      else
+        echo "$DATA" | cut -f1
+      fi
+      ;;
+
+    rm)
+      if [ -z "$FULL_KEY" ]; then echo "Usage: stock rm <key.path>"; return 1; fi
+      _parse_key
+      if [[ "$DOC_PATH" == "v" ]]; then
+         _mongo_exec "db.getSiblingDB('utils').stock.deleteOne({_id: '$DOC_ID'})" > /dev/null
+      else
+         _mongo_exec "db.getSiblingDB('utils').stock.updateOne({_id: '$DOC_ID'}, {\$unset: {'$DOC_PATH': 1}})" > /dev/null
+      fi
+      echo "🗑️  Processed [$FULL_KEY]"
+      ;;
+
+    *)
+      echo "Usage: stock {set <key.path> <val> | get <key.path> | ls | rm <key>}"
+      ;;
+  esac
+}
+
+# ------------------------------------------
+# 10 . TASK (Todo List)
+# ------------------------------------------
+# Purpose: Simple CLI task manager backed by MySQL.
+# Usage:   task add "Buy Milk"
+#          task ls
+#          task done <id>
+task() {
+    local CMD=$1; local ARG="${@:2}"
+    case "$CMD" in
+        add) 
+            [ -z "$ARG" ] && echo "Usage: task add 'Buy Milk'" && return 1
+            jam -e "INSERT INTO utils.tasks (content) VALUES ('${ARG//\'/\'\'}');"
+            echo "✅ Added task." 
+            ;;
+        ls)  
+            # Pretty print with IDs in bold
+            jam -N -B -e "SELECT id, content FROM utils.tasks WHERE status='pending' ORDER BY id DESC;" | \
+            awk -F '\t' '{printf "\033[1;36m%s\033[0m  %s\n", $1, $2}'
+            ;;
+        done) 
             local ID=$2
-            [ -z "$ID" ] && ID=$(jam -N -B -e "SELECT id, content FROM utils.tasks WHERE status='pending';" | fzf --height 40% --layout=reverse | awk '{print $1}')
-            [ -n "$ID" ] && jam -e "UPDATE utils.tasks SET status='done' WHERE id=$ID;" && echo "🎉 Done!" ;;
-        clean) jam -e "DELETE FROM utils.tasks WHERE status='done';" ;;
+            if [ -z "$ID" ]; then
+              # Interactive FZF selection
+              ID=$(jam -N -B -e "SELECT id, content FROM utils.tasks WHERE status='pending';" | \
+                    fzf --height 40% --layout=reverse --header="✅ Mark Done" \
+                        --delimiter=$'\t' --with-nth=2 \
+                        --preview="echo 'Task ID: {1}'" --preview-window="bottom:3:wrap" \
+                    | awk '{print $1}')
+            fi
+            [ -n "$ID" ] && jam -e "UPDATE utils.tasks SET status='done' WHERE id=$ID;" && echo "🎉 Task $ID Complete!" 
+            ;;
+        clean) 
+            jam -e "DELETE FROM utils.tasks WHERE status='done';" 
+            echo "🧹 Cleared completed tasks."
+            ;;
         *) echo "Usage: task {add | ls | done | clean}" ;;
     esac
 }
@@ -511,15 +711,84 @@ EOF
 #          vault load <KEY>
 #          vault env <CATEGORY>
 vault() {
-    local CMD=$1; local KEY=$2; local VAL=$3
+    local CMD=$1
+    local KEY=$2
+    
     case "$CMD" in
-        add) jam -e "INSERT INTO utils.secrets (k,v,category) VALUES ('$KEY','$VAL','${4:-general}') ON DUPLICATE KEY UPDATE v='$VAL';" ;;
-        load) export "$KEY"="$(jam -N -B -e "SELECT v FROM utils.secrets WHERE k='$KEY';")" ;;
-        env)
-            local CAT=$KEY; [ -z "$CAT" ] && CAT=$(jam -N -B -e "SELECT DISTINCT category FROM utils.secrets;" | fzf)
-            while IFS=$'\t' read -r k v; do export "$k"="$v"; echo "🔓 $k"; done < <(jam -N -B -e "SELECT k, v FROM utils.secrets WHERE category='$CAT';") ;;
-        ls) jam -N -B -e "SELECT category, k FROM utils.secrets ORDER BY category;" | column -t -s $'\t' ;;
-        *) echo "Usage: vault {add | load | env | ls}" ;;
+        add)
+            if [ -z "$KEY" ]; then echo "Usage: vault add <KEY> [category]"; return 1; fi
+            local CAT="${3:-general}"
+            
+            echo -n "🔒 Enter Secret for '$KEY': "
+            read -s VAL
+            echo "" 
+            
+            jam -e "INSERT INTO utils.secrets (k,v,category) VALUES ('$KEY','$VAL','$CAT') ON DUPLICATE KEY UPDATE v='$VAL';"
+            echo "✅ Secret stored."
+            ;;
+            
+        load) 
+            local VAL=$(jam -N -B -e "SELECT v FROM utils.secrets WHERE k='$KEY';")
+            if [ -n "$VAL" ]; then
+                export "$KEY"="$VAL"
+                echo "🔓 Loaded $KEY"
+            else
+                echo "❌ Key '$KEY' not found."
+            fi
+            ;;
+            
+        env) 
+            local CAT=$KEY
+            [ -z "$CAT" ] && CAT=$(jam -N -B -e "SELECT DISTINCT category FROM utils.secrets;" | fzf --height=20% --layout=reverse --header="Select Category")
+            [ -z "$CAT" ] && return
+            
+            echo "🔓 Loading '$CAT' environment..."
+            while IFS=$'\t' read -r k v; do 
+                export "$k"="$v"
+                echo "   + $k" 
+            done < <(jam -N -B -e "SELECT k, v FROM utils.secrets WHERE category='$CAT';") 
+            ;;
+
+        peek)
+            [ -z "$KEY" ] && echo "Usage: vault peek <KEY>" && return 1
+            local VAL=$(jam -N -B -e "SELECT v FROM utils.secrets WHERE k='$KEY';")
+            if [ -n "$VAL" ]; then echo "$VAL"; else echo "❌ Key '$KEY' not found."; fi
+            ;;
+
+        rm)
+            [ -z "$KEY" ] && echo "Usage: vault rm <KEY>" && return 1
+            jam -e "DELETE FROM utils.secrets WHERE k='$KEY';" && echo "🗑️  Deleted '$KEY'."
+            ;;
+
+        prune)
+            local CAT=$KEY
+            # Interactive selection if no argument
+            [ -z "$CAT" ] && CAT=$(jam -N -B -e "SELECT DISTINCT category FROM utils.secrets;" | fzf --height=20% --layout=reverse --header="Select Category to PRUNE")
+            [ -z "$CAT" ] && return
+
+            # Count items first
+            local COUNT=$(jam -N -B -e "SELECT COUNT(*) FROM utils.secrets WHERE category='$CAT';")
+            
+            echo -e "\n\033[1;31m☢️   WARNING: PRUNE DETECTED  ☢️\033[0m"
+            echo "Category: '$CAT' ($COUNT secrets)"
+            echo "Action:   Delete ALL secrets in this category."
+            echo -n "Type 'DELETE' to confirm: "
+            read -r confirm
+            
+            if [[ "$confirm" == "DELETE" ]]; then
+                jam -e "DELETE FROM utils.secrets WHERE category='$CAT';"
+                echo "💥 Pruned category '$CAT'."
+            else
+                echo "❌ Aborted."
+            fi
+            ;;
+            
+        ls) 
+            jam -N -B -e "SELECT category, k FROM utils.secrets ORDER BY category;" | \
+            awk -F '\t' '{printf "\033[1;34m%-15s\033[0m %s\n", $1, $2}'
+            ;;
+            
+        *) echo "Usage: vault {add | load | env | ls | peek | rm | prune}" ;;
     esac
 }
 
