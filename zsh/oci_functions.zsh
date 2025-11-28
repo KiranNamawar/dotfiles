@@ -190,28 +190,88 @@ site() {
   esac
 }
 
-    # ------------------------------------------
-    # 3. DROP (Public Share)
-    # ------------------------------------------
-    # Purpose: Uploads file to public bucket and returns URL.
-    # Usage:   drop <file>
-    drop() {
-        local FILE="$1"
-        local REMOTE="oracle:dropzone"
-        local DOMAIN="drop.tamatar.dev"
+# ------------------------------------------
+# 3. DROP (Public Share)
+# ------------------------------------------
+# Purpose: Uploads file to public bucket and returns URL.
+# Usage:   drop <file>
+drop() {
+  local ARG1=$1
+  local REMOTE="oracle:dropzone"
+  local DOMAIN="drop.tamatar.dev"
 
-        [ ! -f "$FILE" ] && echo "❌ File not found." && return 1
-        echo "🍅 Dropping '$FILE'..."
-        rclone copy "$FILE" "$REMOTE/" -P
+  # Helper: Purge Logic (Nuclear Option)
+  _drop_purge() {
+      if [ -n "$CF_ZONE_ID" ] && [ -n "$CF_API_TOKEN" ]; then
+         echo -n "🧹 Purging Cloudflare Cache... "
+         
+         # Always use purge_everything. It is the only way to be 100% sure.
+         local result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
+              -H "Authorization: Bearer $CF_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"purge_everything":true}')
+         
+         if [ "$(echo "$result" | jq -r '.success')" = "true" ]; then
+             echo "✅ Done."
+         else
+             echo "❌ Failed."
+             echo "$result" | jq -r '.errors[0].message' 2>/dev/null
+         fi
+      else
+         echo "⚠️  Secrets missing. Cache NOT purged."
+      fi
+  }
 
-        local FILENAME=$(basename "$FILE")
-        local ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$FILENAME'))")
-        local URL="https://${DOMAIN}/${ENCODED}"
-        _copy_to_clip "$URL"
-        echo "✅ Link: $URL"
-    }
+  case "$ARG1" in
+    rm)
+       local target="$2"
+       if [ -z "$target" ]; then echo "Usage: drop rm <filename>"; return 1; fi
+       
+       echo "🔥 Deleting '$target'..."
+       # Check existence first
+       if [[ -z $(rclone lsf "$REMOTE/$target" 2>/dev/null) ]]; then
+          echo "❌ Error: File '$target' not found."
+          return 1
+       fi
 
-    # ------------------------------------------
+       if rclone delete "$REMOTE/$target" -P; then
+           _drop_purge
+           echo "💀 Gone."
+       fi
+       ;;
+
+    ls)
+       echo "📂 Active Drops:"
+       rclone lsf "$REMOTE" --format "tsp" --separator "|" | \
+       sort -r | \
+       numfmt --to=iec-i --suffix=B --delimiter="|" --field=2 | \
+       awk -F "|" '{
+          split($1, t, ".");
+          printf "\033[1;34m%s\033[0m  \033[1;33m%9s\033[0m  %s\n", t[1], $2, $3
+       }'
+       ;;
+
+    *)
+       if [ -f "$ARG1" ]; then
+           echo "🍅 Dropping '$ARG1'..."
+           rclone copy "$ARG1" "$REMOTE/" --header-upload "Content-Disposition: inline" -P
+           
+           _drop_purge
+
+           local filename=$(basename "$ARG1")
+           local encoded=${filename// /%20}
+           local url="https://${DOMAIN}/${encoded}"
+           
+           _copy_to_clip "$url"
+           echo "✅ Link: $url"
+       else
+           echo "Usage: drop <file> | drop rm <file> | drop ls"
+           return 1
+       fi
+       ;;
+  esac
+}
+# ------------------------------------------
     # 4. BUCKETS (Infra Manager)
     # ------------------------------------------
     # Purpose: Generic CRUD for all OCI buckets.
