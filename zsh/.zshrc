@@ -6,7 +6,7 @@
 export ZSH="$HOME/.oh-my-zsh"
 
 # Path exports (Consolidated)
-export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$HOME/go/bin:$PATH"
 
 # Force Zsh to show hidden files (dotfiles) in autocomplete
 _comp_options+=(globdots)
@@ -22,12 +22,15 @@ autoload -Uz compinit && compinit
 [ -f ~/.dotfiles/zsh/completions/oci_completions.zsh ]  && source ~/.dotfiles/zsh/completions/oci_completions.zsh
 [ -f ~/.dotfiles/zsh/completions/ai_completions.zsh ]   && source ~/.dotfiles/zsh/completions/ai_completions.zsh
 [ -f ~/.dotfiles/zsh/completions/util_completions.zsh ] && source ~/.dotfiles/zsh/completions/util_completions.zsh
+[ -f ~/.dotfiles/zsh/completions/azr_completions.zsh ]  && source ~/.dotfiles/zsh/completions/azr_completions.zsh
 
 # --- Secrets Loading ---
-# Load General Secrets
+# 1. Load General Secrets
 [ -f ~/.secrets.sh ] && source ~/.secrets.sh
-# Load OCI Secrets (Required for 'oi')
+# 2. Load OCI Secrets (Required for 'oi')
 [ -f ~/.oci/.secrets.sh ] && source ~/.oci/.secrets.sh
+# 3. Azure Secrets (Sky)
+[ -f ~/.azure/.secrets.sh ] && source ~/.azure/.secrets.sh
 
 # --- Tmux Auto-Start ---
 ZSH_TMUX_AUTOSTART=true
@@ -43,9 +46,14 @@ source $ZSH/oh-my-zsh.sh
 #  TAMATAR OS (The Trilogy)
 # ==========================================
 
-# 1. Cloud Infrastructure (oi)
+# 1. Oracle Infrastructure (oi)
 if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
     source ~/.dotfiles/zsh/oci_functions.zsh
+fi
+
+# 2. Azure Infrastructure (azr)
+if [ -f ~/.dotfiles/zsh/azr_functions.zsh ]; then
+    source ~/.dotfiles/zsh/azr_functions.zsh
 fi
 
 # 2. Artificial Intelligence (ai)
@@ -60,7 +68,7 @@ if [ -f ~/.dotfiles/zsh/functions.zsh ]; then
 fi
 
 # Dashboard Alias
-alias tmt='echo -e "\n🍅 \033[1;31mTAMATAR OS\033[0m"; echo -e "  ☁️   oi    :: Cloud Infrastructure"; echo -e "  🧠  ai    :: Artificial Intelligence"; echo -e "  ⚡  util  :: Local Utilities\n"'
+alias tmt='echo -e "\n🍅 \033[1;31mTAMATAR OS\033[0m"; echo -e "  ☁️   oi    :: Cloud Infrastructure (OCI)"; echo -e "  ✈️   sky   :: Sky Infrastructure (Azure)"; echo -e "  🧠  ai    :: Intelligence"; echo -e "  ⚡  util  :: Local Utilities\n"'
 
 
 # ==========================================

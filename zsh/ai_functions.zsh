@@ -33,9 +33,9 @@ _render_output() {
     fi
 
     if command -v glow &> /dev/null && [ -t 1 ]; then
-        echo "$content" | glow -
+        printf '%s\n' "$content" | glow -p -
     else
-        echo "$content"
+        printf '%s\n' "$content"
     fi
 }
 
@@ -223,8 +223,15 @@ gcmt() {
 
     local branch=$(git branch --show-current)
     local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 100000)
+    local sys="You are an expert Git Release Manager who writes high-quality Semantic Commit Messages. 
+      Your output MUST adhere strictly to the following rules:
+      1.  **Format:** <type>(<scope>): <subject> followed by an optional blank line and a detailed body.
+      2.  **Style:** Use the Imperative Mood (e.g., 'Fix bug', not 'Fixed bug').
+      3.  **Length/Detail:**
+          * For **large, complex, or multi-component** changes, include a **detailed, paragraph-based message body** after the subject line explaining the *why* and *how*. Use markdown bullet points in the body if needed.
+          * For **small, simple** changes, output only the single line <type>(<scope>): <subject>.
+      4.  **Output:** Provide ONLY the raw, unquoted commit message string. Do NOT add any conversational text or explanation."
 
-    local sys="You are a Release Manager. Write a Semantic Git Commit Message. Format: <type>(<scope>): <subject>. Rules: Imperative mood. Output ONLY the raw string."
     local user_prompt="Current Branch: $branch\n\nCode Changes:\n$diff_content"
     
     local msg=$(_call_gemini "$sys" "$user_prompt")
