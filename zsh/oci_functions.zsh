@@ -130,64 +130,64 @@ basket() {
 #          site ls
 #          site rm my-project
 site() {
-  local CMD=$1
-  local REMOTE="oracle:website"
-  
-  # Helper: Shared Purge Logic
-  _site_purge() {
-      if [ -n "$CF_ZONE_ID" ] && [ -n "$CF_API_TOKEN" ]; then
-         echo -n "🧹 Purging Cloudflare Cache... "
-         local result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
-              -H "Authorization: Bearer $CF_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d '{"purge_everything":true}')
-         
-         if [ "$(echo "$result" | jq -r '.success')" = "true" ]; then
-             echo "✅ Done."
-         else
-             echo "❌ Failed."
-             echo "$result" | jq -r '.errors[0].message' 2>/dev/null
-         fi
-      else
-         echo "⚠️  Secrets missing. Cache NOT purged."
-      fi
-  }
+    local CMD=$1
+    local REMOTE="oracle:website"
 
-  case "$CMD" in
-    deploy)
-      local DIR="$2"
-      local PROJ="$3"
-      [ -z "$PROJ" ] && echo "Usage: site deploy <dir> <project>" && return 1
-      
-      echo "🚀 Deploying '$PROJ'..."
-      rclone sync "$DIR" "$REMOTE/$PROJ/" --progress --transfers 16 --checksum --delete-excluded
-      
-      local URL="https://${PROJ}-site.tamatar.dev"
-      
-      # Trigger Purge
-      _site_purge
+    # Helper: Shared Purge Logic
+    _site_purge() {
+        if [ -n "$CF_ZONE_ID" ] && [ -n "$CF_API_TOKEN" ]; then
+            echo -n "🧹 Purging Cloudflare Cache... "
+            local result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
+                    -H "Authorization: Bearer $CF_API_TOKEN" \
+                    -H "Content-Type: application/json" \
+                -d '{"purge_everything":true}')
 
-      _copy_to_clip "$URL"
-      echo "🌍 Live at: $URL"
-      ;;
+            if [ "$(echo "$result" | jq -r '.success')" = "true" ]; then
+                echo "✅ Done."
+            else
+                echo "❌ Failed."
+                echo "$result" | jq -r '.errors[0].message' 2>/dev/null
+            fi
+        else
+            echo "⚠️  Secrets missing. Cache NOT purged."
+        fi
+    }
 
-    rm) 
-      local PROJ="$2"
-      [ -z "$PROJ" ] && echo "Usage: site rm <project>" && return 1
-      
-      echo "🔥 Deleting project '$PROJ'..."
-      rclone purge "$REMOTE/$PROJ/" 
-      
-      # Trigger Purge
-      _site_purge
-      
-      echo "💀 Project obliterated." 
-      ;;
+    case "$CMD" in
+        deploy)
+            local DIR="$2"
+            local PROJ="$3"
+            [ -z "$PROJ" ] && echo "Usage: site deploy <dir> <project>" && return 1
 
-    ls) echo "📂 Active Projects:"; rclone lsf "$REMOTE" --dirs-only ;;
-    
-    *) echo "Usage: site {deploy | ls | rm}" ;;
-  esac
+            echo "🚀 Deploying '$PROJ'..."
+            rclone sync "$DIR" "$REMOTE/$PROJ/" --progress --transfers 16 --checksum --delete-excluded
+
+            local URL="https://${PROJ}-site.tamatar.dev"
+
+            # Trigger Purge
+            _site_purge
+
+            _copy_to_clip "$URL"
+            echo "🌍 Live at: $URL"
+            ;;
+
+        rm)
+            local PROJ="$2"
+            [ -z "$PROJ" ] && echo "Usage: site rm <project>" && return 1
+
+            echo "🔥 Deleting project '$PROJ'..."
+            rclone purge "$REMOTE/$PROJ/"
+
+            # Trigger Purge
+            _site_purge
+
+            echo "💀 Project obliterated."
+            ;;
+
+        ls) echo "📂 Active Projects:"; rclone lsf "$REMOTE" --dirs-only ;;
+
+        *) echo "Usage: site {deploy | ls | rm}" ;;
+    esac
 }
 
 # ------------------------------------------
@@ -196,119 +196,200 @@ site() {
 # Purpose: Uploads file to public bucket and returns URL.
 # Usage:   drop <file>
 drop() {
-  local ARG1=$1
-  local REMOTE="oracle:dropzone"
-  local DOMAIN="drop.tamatar.dev"
+    local ARG1=$1
+    local REMOTE="oracle:dropzone"
+    local DOMAIN="drop.tamatar.dev"
 
-  # Helper: Purge Logic (Nuclear Option)
-  _drop_purge() {
-      if [ -n "$CF_ZONE_ID" ] && [ -n "$CF_API_TOKEN" ]; then
-         echo -n "🧹 Purging Cloudflare Cache... "
-         
-         # Always use purge_everything. It is the only way to be 100% sure.
-         local result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
-              -H "Authorization: Bearer $CF_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d '{"purge_everything":true}')
-         
-         if [ "$(echo "$result" | jq -r '.success')" = "true" ]; then
-             echo "✅ Done."
-         else
-             echo "❌ Failed."
-             echo "$result" | jq -r '.errors[0].message' 2>/dev/null
-         fi
-      else
-         echo "⚠️  Secrets missing. Cache NOT purged."
-      fi
-  }
+    # Helper: Purge Logic (Nuclear Option)
+    _drop_purge() {
+        if [ -n "$CF_ZONE_ID" ] && [ -n "$CF_API_TOKEN" ]; then
+            echo -n "🧹 Purging Cloudflare Cache... "
 
-  case "$ARG1" in
-    rm)
-       local target="$2"
-       if [ -z "$target" ]; then echo "Usage: drop rm <filename>"; return 1; fi
-       
-       echo "🔥 Deleting '$target'..."
-       # Check existence first
-       if [[ -z $(rclone lsf "$REMOTE/$target" 2>/dev/null) ]]; then
-          echo "❌ Error: File '$target' not found."
-          return 1
-       fi
+            # Always use purge_everything. It is the only way to be 100% sure.
+            local result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
+                    -H "Authorization: Bearer $CF_API_TOKEN" \
+                    -H "Content-Type: application/json" \
+                -d '{"purge_everything":true}')
 
-       if rclone delete "$REMOTE/$target" -P; then
-           _drop_purge
-           echo "💀 Gone."
-       fi
-       ;;
+            if [ "$(echo "$result" | jq -r '.success')" = "true" ]; then
+                echo "✅ Done."
+            else
+                echo "❌ Failed."
+                echo "$result" | jq -r '.errors[0].message' 2>/dev/null
+            fi
+        else
+            echo "⚠️  Secrets missing. Cache NOT purged."
+        fi
+    }
 
-    ls)
-       echo "📂 Active Drops:"
-       rclone lsf "$REMOTE" --format "tsp" --separator "|" | \
-       sort -r | \
-       numfmt --to=iec-i --suffix=B --delimiter="|" --field=2 | \
-       awk -F "|" '{
+    case "$ARG1" in
+        rm)
+            local target="$2"
+            if [ -z "$target" ]; then echo "Usage: drop rm <filename>"; return 1; fi
+
+            echo "🔥 Deleting '$target'..."
+            # Check existence first
+            if [[ -z $(rclone lsf "$REMOTE/$target" 2>/dev/null) ]]; then
+                echo "❌ Error: File '$target' not found."
+                return 1
+            fi
+
+            if rclone delete "$REMOTE/$target" -P; then
+                _drop_purge
+                echo "💀 Gone."
+            fi
+            ;;
+
+        ls)
+            echo "📂 Active Drops:"
+            rclone lsf "$REMOTE" --format "tsp" --separator "|" | \
+                sort -r | \
+                numfmt --to=iec-i --suffix=B --delimiter="|" --field=2 | \
+            awk -F "|" '{
           split($1, t, ".");
           printf "\033[1;34m%s\033[0m  \033[1;33m%9s\033[0m  %s\n", t[1], $2, $3
        }'
+            ;;
+
+        *)
+            if [ -f "$ARG1" ]; then
+                echo "🍅 Dropping '$ARG1'..."
+                rclone copy "$ARG1" "$REMOTE/" --header-upload "Content-Disposition: inline" -P
+
+                _drop_purge
+
+                local filename=$(basename "$ARG1")
+                local encoded=${filename// /%20}
+                local url="https://${DOMAIN}/${encoded}"
+
+                _copy_to_clip "$url"
+                echo "✅ Link: $url"
+            else
+                echo "Usage: drop <file> | drop rm <file> | drop ls"
+                return 1
+            fi
+            ;;
+    esac
+}
+
+# ------------------------------------------
+# 4. BUCKETS (Infra Manager)
+# ------------------------------------------
+# Purpose: Generic CRUD for all OCI buckets.
+# Usage:   buckets mk <name>
+#          buckets ls [name]
+#          buckets sync <src> <dest>
+buckets() {
+  local CMD=$1
+  local REMOTE="oracle"
+
+  # Ensure Compartment ID is set
+  if [ -z "$COMPARTMENT_ID" ]; then
+      [ -f ~/.oci/.secrets.sh ] && source ~/.oci/.secrets.sh
+  fi
+  
+  case "$CMD" in
+    ls)
+      local TARGET="$2"
+      if [ -z "$TARGET" ]; then
+        echo "📦 Cloud Buckets ($OCI_REGION):"
+        local preview_cmd="rclone lsf $REMOTE:{} --format tsp --separator '|' | sort -r | numfmt --to=iec-i --suffix=B --delimiter='|' --field=2 | column -t -s '|'"
+        local selected=$(rclone lsd "$REMOTE:" | awk '{print $NF}' | \
+            fzf --height 40% --layout=reverse --border --header="Select Bucket" --prompt="🪣 > " --preview="$preview_cmd" --preview-window="right:60%")
+        [ -n "$selected" ] && buckets ls "$selected"
+      else
+        echo "📂 Contents of '$TARGET':"
+        rclone lsf "$REMOTE:$TARGET" --format "tsp" --separator "|" | \
+        sort -r | \
+        numfmt --to=iec-i --suffix=B --delimiter="|" --field=2 | \
+        awk -F "|" '{split($1, t, "."); printf "\033[1;34m%s\033[0m  \033[1;33m%9s\033[0m  %s\n", t[1], $2, $3}' | less -F -R -X 
+      fi
+      ;;
+
+    mk)
+      local NAME="$2"
+      local ACCESS="${3:-private}" 
+      if [ -z "$NAME" ]; then echo "Usage: buckets mk <name> [private/public]"; return 1; fi
+      
+      if [ -z "$COMPARTMENT_ID" ]; then 
+         echo "❌ Error: COMPARTMENT_ID not set."
+         return 1
+      fi
+
+      local PUBLIC_FLAG="NoPublicAccess"
+      [[ "$ACCESS" == "public" ]] && PUBLIC_FLAG="ObjectRead"
+
+      echo "🔨 Creating '$NAME' ($ACCESS)..."
+      
+      local OUTPUT
+      OUTPUT=$(oci os bucket create --namespace "$OCI_NS" --name "$NAME" \
+          --compartment-id "$COMPARTMENT_ID" \
+          --public-access-type "$PUBLIC_FLAG" \
+          --storage-tier Standard 2>&1)
+
+      if [ $? -eq 0 ]; then
+          echo "✅ Created."
+      else
+          echo "❌ Failed."
+          # Show the actual error message
+          echo "$OUTPUT"
+      fi
+      ;;
+
+    rm)
+      local TARGET="$2"
+      [ -z "$TARGET" ] && echo "Usage: buckets rm <name>" && return 1
+      if rclone purge "$REMOTE:$TARGET"; then
+          echo "🗑️  Deleted."
+      else
+          echo "❌ Failed to delete (Bucket might be non-empty?)"
+      fi
+      ;;
+    cp)
+       local SRC="$2"
+       local DEST="$3"
+       [ -z "$DEST" ] && echo "Usage: buckets cp <local_path> <bucket_name[/path]>" && return 1
+       echo "📋 Copying '$SRC' -> '$REMOTE:$DEST'..."
+       rclone copy "$SRC" "$REMOTE:$DEST" -P --transfers 16
+       ;;
+    sync)
+       local SRC="$2"
+       local DEST="$3"
+       [ -z "$DEST" ] && echo "Usage: buckets sync <local_path> <bucket_name[/path]>" && return 1
+       echo "🔄 Syncing '$SRC' -> '$REMOTE:$DEST'..."
+       echo "⚠️  Warning: This will DELETE files in '$DEST' that are not in '$SRC'."
+       # Rclone sync is destructive to the destination!
+       rclone sync "$SRC" "$REMOTE:$DEST" -P --transfers 16 --check-first
        ;;
 
-    *)
-       if [ -f "$ARG1" ]; then
-           echo "🍅 Dropping '$ARG1'..."
-           rclone copy "$ARG1" "$REMOTE/" --header-upload "Content-Disposition: inline" -P
-           
-           _drop_purge
-
-           local filename=$(basename "$ARG1")
-           local encoded=${filename// /%20}
-           local url="https://${DOMAIN}/${encoded}"
-           
-           _copy_to_clip "$url"
-           echo "✅ Link: $url"
-       else
-           echo "Usage: drop <file> | drop rm <file> | drop ls"
-           return 1
-       fi
-       ;;
+    nuke)
+      local TARGET="$2"
+      [ -z "$TARGET" ] && echo "Usage: buckets nuke <name>" && return 1
+      echo -e "\n\033[1;31m☢️   WARNING: NUKE DETECTED  ☢️\033[0m"
+      echo "Target: '$TARGET'"
+      echo -n "Type 'DELETE' to confirm: "
+      read -r confirm
+      if [[ "$confirm" == "DELETE" ]]; then
+        echo "🌪️  Deleting object versions..."
+        if ! oci os object bulk-delete-versions --namespace "$OCI_NS" --bucket-name "$TARGET" --force &>/dev/null; then
+             echo "❌ Error: Bucket '$TARGET' not found or access denied."
+             return 1
+        fi
+        
+        echo "🗑️  Deleting bucket..."
+        if oci os bucket delete --namespace "$OCI_NS" --bucket-name "$TARGET" --force &>/dev/null; then
+             echo "💥 Obliterated."
+        else
+             echo "❌ Failed to delete bucket."
+        fi
+      else
+        echo "❌ Aborted."
+      fi
+      ;;
+      
+    *) echo "Usage: buckets {ls | mk | rm | sync | nuke}" ;;
   esac
 }
-# ------------------------------------------
-    # 4. BUCKETS (Infra Manager)
-    # ------------------------------------------
-    # Purpose: Generic CRUD for all OCI buckets.
-    # Usage:   buckets mk <name>
-    #          buckets ls [name]
-    #          buckets sync <src> <dest>
-    buckets() {
-        local CMD=$1; local TARGET=$2; local REMOTE="oracle"
-        case "$CMD" in
-            ls)
-                if [ -z "$TARGET" ]; then
-                    # Clean output: Just the bucket names
-                    echo "📦 Active Buckets:"
-                    rclone lsd "$REMOTE:" | awk '{print $NF}' | sed 's/^/  - /'
-                else
-                    # Listing contents
-                    rclone lsf "$REMOTE:$TARGET"
-                fi
-                ;;
-            mk) oci os bucket create --namespace "$OCI_NS" --name "$TARGET" --storage-tier Standard --public-access-type NoPublicAccess ;;
-            rm) rclone purge "$REMOTE:$TARGET" ;;
-            sync) rclone sync "$2" "$REMOTE:$3" -P ;;
-            nuke)
-                # FORCE DELETE bucket + all hidden versions
-                if [ -z "$TARGET" ]; then echo "Usage: buckets nuke <name>"; return 1; fi
-                echo -n "☢️  Destroy ALL versions in '$TARGET'? [y/N] "
-                read -r confirm
-                if [[ "$confirm" == "y" ]]; then
-                    oci os object bulk-delete-versions --namespace "$OCI_NS" --bucket-name "$TARGET" --force
-                    oci os bucket delete --namespace "$OCI_NS" --name "$TARGET" --force
-                    echo "✅ Obliterated."
-                fi
-                ;;
-            *) echo "Usage: buckets {ls | mk | rm | sync}" ;;
-        esac
-    }
-
     # ------------------------------------------
     # 5. JAM (MySQL HeatWave)
     # ------------------------------------------
