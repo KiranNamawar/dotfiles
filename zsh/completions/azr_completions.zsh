@@ -21,11 +21,11 @@ _ledger_comp() {
 _trunk_comp() {
     local -a cmds
     cmds=(
-        'mount:Open Trunk (Auto-Enables VPN)' 
-        'unmount:Close Trunk (Disables VPN)' 
+        'mount:Open Trunk (Auto-Enables VPN)'
+        'unmount:Close Trunk (Disables VPN)'
         'ls:List contents'
     )
-    
+
     _arguments -C '1: :->cmds' '*:: :->args'
     case $state in
         cmds) _describe 'command' cmds ;;
@@ -42,11 +42,15 @@ _say_comp() {
     _arguments '1:Text to speak'
 }
 
-# --- HEY (Jarvis Mode) ---
+# --- HEY (Jarvis Mode - FINAL REFINEMENT) ---
 _hey_comp() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    # 1. Define custom AI tools
     local -a ai_tools
-    # These are the "High Value" tools to suggest
     ai_tools=(
+        'stop:Silence Audio'
         'ask:General Q&A'
         'research:Web Search'
         'summarize:Shorten Text'
@@ -57,20 +61,33 @@ _hey_comp() {
         'pick:Extract Data'
     )
 
+    # Arguments:
     _arguments -C \
-        '1: :_alternative "tools:AI Tools:(( ${ai_tools} ))" "questions:Question:()"' \
+        '1:AI Tool/Question:->command_or_question' \
         '*::Args:->args'
 
     case $state in
-        args) 
-            # If the user picked a tool, suggest args for it
+        command_or_question)
+            _describe 'AI Tool' ai_tools
+            return
+            ;;
+        args)
+            # Logic for custom tools (remains the same)
             case $line[1] in
-                ask|research|rx|explain) _message "Query string" ;;
-                summarize|why|audit|pick) _arguments '1:Input File (Optional):_files' ;;
-            esac 
+                ask|research|rx|explain)
+                    _message "Query string"
+                    ;;
+                summarize|why|audit|pick)
+                    _arguments '1:Input File (Optional):_files'
+                    ;;
+                *)
+                    _message "Arguments for $line[1]"
+                    ;;
+            esac
             ;;
     esac
 }
+
 
 # --- REGISTER COMPLETIONS ---
 compdef _silo_comp silo

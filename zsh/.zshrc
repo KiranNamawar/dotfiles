@@ -68,7 +68,7 @@ if [ -f ~/.dotfiles/zsh/functions.zsh ]; then
 fi
 
 # Dashboard Alias
-alias tmt='echo -e "\n🍅 \033[1;31mTAMATAR OS\033[0m"; echo -e "  ☁️   oi    :: Cloud Infrastructure (OCI)"; echo -e "  ✈️   sky   :: Sky Infrastructure (Azure)"; echo -e "  🧠  ai    :: Intelligence"; echo -e "  ⚡  util  :: Local Utilities\n"'
+alias tmt='echo -e "\n🍅 \033[1;31mTAMATAR OS\033[0m"; echo -e "  ☁️  oi    :: Cloud Infrastructure (OCI)"; echo -e "  ✈️  sky   :: Sky Infrastructure (Azure)"; echo -e "  🧠  ai    :: Intelligence"; echo -e "  ⚡  util  :: Local Utilities\n"'
 
 
 # ==========================================
@@ -89,8 +89,8 @@ alias sqlite='litecli'
 # fnm (Node Manager)
 FNM_PATH="/home/kiran/.local/share/fnm"
 if [ -d "$FNM_PATH" ]; then
-  export PATH="$FNM_PATH:$PATH"
-  eval "`fnm env`"
+    export PATH="$FNM_PATH:$PATH"
+    eval "`fnm env`"
 fi
 
 # Starship Prompt
@@ -124,8 +124,8 @@ export FZF_ALT_C_COMMAND='fd --type d --strip-cwd-prefix --hidden --follow --exc
 
 # 2. General FZF Opts (The "Pro" Look)
 export FZF_DEFAULT_OPTS="
-  --height 60% 
-  --border 
+  --height 60%
+  --border
   --preview 'bat --style=numbers --color=always --line-range :500 {}'
   --bind 'ctrl-/:toggle-preview'
 "

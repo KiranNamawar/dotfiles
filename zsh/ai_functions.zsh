@@ -70,7 +70,7 @@ _call_groq() {
         -d "$json_payload")
 
     # Capture exit code of jq to detect parse failure
-    local answer=$(printf '%s' "$response" | jq -r '.choices[0].message.content')
+    local answer=$(printf '%s' "$response" | jq -r '.choices[0].message.content' 2>/dev/null)
     
     if [ -z "$answer" ] || [ "$answer" = "null" ]; then
         echo "❌ API Error:" >&2
