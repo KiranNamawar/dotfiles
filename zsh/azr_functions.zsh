@@ -90,27 +90,31 @@ trunk() {
     if [ -z "$TRUNK_KEY" ]; then source ~/.azure/.secrets.sh; fi
     local MOUNT_POINT="$HOME/trunk"
 
+    # Ensure mount point exists
+    if [ ! -d "$MOUNT_POINT" ]; then mkdir -p "$MOUNT_POINT"; fi
+
     case "$1" in
         mount)
-            if [ -d "$MOUNT_POINT" ] && mountpoint -q "$MOUNT_POINT"; then
+            if mountpoint -q "$MOUNT_POINT"; then
                 echo "✅ Trunk is already open."
                 return
             fi
 
             # 1. AUTO-ENABLE VPN (Bypass ISP Block)
             echo "🛡️  Engaging Cloaking Field (Exit Node)..."
-            sudo tailscale set --exit-node=station
-            sleep 2
+            if ! sudo tailscale set --exit-node=station; then
+                echo "❌ Failed to set exit node. Aborting."
+                return 1
+            fi
 
-            mkdir -p "$MOUNT_POINT"
+            sleep 3
 
             echo "☁️  Opening Trunk..."
-            sudo mount -t cifs "//$TRUNK_ACCOUNT.file.core.windows.net/$TRUNK_SHARE" "$MOUNT_POINT" \
-                -o vers=3.0,username="$TRUNK_ACCOUNT",password="$TRUNK_KEY",dir_mode=0755,file_mode=0644,uid=$(id -u),gid=$(id -g)
+            if sudo mount -t cifs "//$TRUNK_ACCOUNT.file.core.windows.net/$TRUNK_SHARE" "$MOUNT_POINT" \
+                -o vers=3.0,username="$TRUNK_ACCOUNT",password="$TRUNK_KEY",dir_mode=0755,file_mode=0644,uid=$(id -u),gid=$(id -g); then
 
-            if mountpoint -q "$MOUNT_POINT"; then
                 echo "✅ Mounted to: $MOUNT_POINT"
-                echo "⚠️  VPN Active. Run 'trunk unmount' to disable."
+                echo "⚠️  VPN ACTIVE: Internet is routing through Azure. Run 'trunk unmount' to disable."
             else
                 echo "❌ Mount failed. Disabling VPN..."
                 sudo tailscale set --exit-node=
@@ -120,20 +124,31 @@ trunk() {
         unmount)
             echo "🔒 Closing Trunk..."
 
-            # Only disable VPN if unmount succeeds
-            if sudo umount "$MOUNT_POINT"; then
-                echo "🛡️  Disengaging Cloaking Field..."
-                sudo tailscale set --exit-node=
-                echo "✅ Trunk closed & VPN disabled."
-
-                # OPTIONAL: Remove folder only if it is truly empty/unmounted
-                # rmdir "$MOUNT_POINT" 2>/dev/null
+            # 1. Unmount (Lazy unmount -l prevents hanging if network is down)
+            if sudo umount -l "$MOUNT_POINT"; then
+                echo "✅ Unmounted."
             else
-                echo "❌ Unmount failed (File in use?). VPN left ON for safety."
+                echo "❌ Error unmounting (File in use?)."
+                return 1
             fi
+
+            # 2. Disable VPN
+            echo "🛡️  Disengaging Cloaking Field..."
+            sudo tailscale set --exit-node=
+            echo "🌍 Local Internet Restored."
             ;;
 
-        ls) ls -lh "$MOUNT_POINT" ;;
+        ls)
+            if mountpoint -q "$MOUNT_POINT"; then
+                echo "📂 Trunk Contents:"
+                ls -lh "$MOUNT_POINT"
+                echo ""
+                echo "📊 Usage:"
+                df -h "$MOUNT_POINT" | awk 'NR==2 {print $3 " Used / " $2 " Total (" $5 ")"}'
+            else
+                echo "🔒 Trunk is closed."
+            fi
+            ;;
         *) echo "Usage: trunk {mount | unmount | ls}" ;;
     esac
 }

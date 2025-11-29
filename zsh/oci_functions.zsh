@@ -391,6 +391,69 @@ buckets() {
   esac
 }
 
+# ==========================================
+#  OBSIDIAN MANAGER
+# ==========================================
+notes() {
+    local NOTES_PATH="$HOME/Documents/notes"
+    local CMD=$1
+    local REMOTE="oracle:notes"
+
+    # Safety: Check if local folder exists
+    if [ ! -d "$NOTES_PATH" ]; then
+        echo "❌ Error: Local path '$NOTES_PATH' does not exist."
+        return 1
+    fi
+
+    # Config: Ignore the .obsidian folder entirely
+    local FLAGS=(--exclude ".obsidian/**")
+
+    case "$CMD" in
+        up|push|backup)
+            echo "📝 Backing up Notes..."
+            # Added $EXCLUDE_FLAGS
+            rclone sync "$NOTES_PATH" "$REMOTE" -P --transfers 16 --delete-excluded "${FLAGS[@]}"
+            notify -T "memo" "Obsidian Backup Complete"
+            ;;
+
+        down|pull|restore)
+            echo "⚠️  WARNING: This will OVERWRITE local changes."
+            echo -n "Type 'RESTORE' to confirm: "
+            read -r confirm
+            if [[ "$confirm" == "RESTORE" ]]; then
+                echo "📝 Restoring Notes..."
+                rclone sync "$REMOTE" "$NOTES_PATH" -P --transfers 16 "${FLAGS[@]}"
+                echo "✅ Done."
+            else
+                echo "❌ Aborted."
+            fi
+            ;;
+
+        status|check)
+            echo "🔍 Checking status"
+            
+            # Added $EXCLUDE_FLAGS here too so status ignores config files
+            local CHANGES=$(rclone check "$NOTES_PATH" "$REMOTE" --combined - "${FLAGS[@]}" 2>/dev/null | grep -v "^=")
+            
+            if [ -z "$CHANGES" ]; then
+                echo "✅ Everything is in sync."
+            else
+                echo -e "\n\033[1;33mPending Changes:\033[0m"
+                echo "$CHANGES" | \
+                sed 's/^+ /  🟢 New: /' | \
+                sed 's/^- /  🔴 Del: /' | \
+                sed 's/^\* /  📝 Mod: /'
+            fi
+            ;;
+            
+        open)
+            # Silence output and detach process (&|)
+            xdg-open "obsidian://open?path=$NOTES_PATH" >/dev/null 2>&1 &|
+            ;;
+
+        *) echo "Usage: notes {up | down | status | open}" ;;
+    esac
+}
 
 # ------------------------------------------
 # 5. JAM (MySQL HeatWave)
