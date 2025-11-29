@@ -858,6 +858,136 @@ vault() {
     esac
 }
 
+# ------------------------------------------
+# 12. MARK (AI Smart Bookmarks) - v1.1 (Zsh Fix)
+# ------------------------------------------
+# Purpose: Saves URLs to MySQL (Jam) and uses AI to generate summaries/tags.
+#
+# Usage:   mark add <url>   (Fetch, Analyze, Save)
+#          mark ls          (Interactive Search & Open)
+#          mark rm <id>     (Delete bookmark)
+#
+# Dependencies: jam (MySQL), curl, _call_groq (AI Layer)
+mark() {
+    local CMD=$1
+    local ARG=$2
+
+    _mark_init() {
+        jam -e "CREATE TABLE IF NOT EXISTS utils.bookmarks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            url TEXT NOT NULL,
+            title VARCHAR(255),
+            summary TEXT,
+            tags VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );" >/dev/null 2>&1
+    }
+
+    _html_to_text() {
+        # Increased limit to 100k for Gemini (It has a huge context window)
+        sed -e 's/<[^>]*>/ /g' | tr -s ' ' | head -c 100000
+    }
+
+    case "$CMD" in
+        init)
+            echo "⚙️  Initializing database table..."
+            _mark_init
+            echo "✅ Ready."
+            ;;
+
+        add)
+            if [ -z "$ARG" ]; then echo "Usage: mark add <url>"; return 1; fi
+            
+            echo "🌐 Fetching content..."
+            local HTML=$(curl -sL "$ARG" -H "User-Agent: Mozilla/5.0")
+            
+            local TITLE=$(echo "$HTML" | grep -oP '(?<=<title>)(.*)(?=</title>)' | head -n 1)
+            [ -z "$TITLE" ] && TITLE="$ARG"
+            
+            local RAW_TEXT=$(echo "$HTML" | _html_to_text)
+            
+            echo "🧠 Analyzing (Gemini Flash)..."
+            local SYS_PROMPT="You are a Bookmark Assistant. Analyze the website text provided.
+            Output JSON with two keys:
+            1. 'summary': A concise summary (max 3 sentences).
+            2. 'tags': A string of 5-7 relevant hashtags (e.g. #linux #dev).
+            Do not output markdown code blocks."
+            
+            local AI_OUT=$(_call_gemini "$SYS_PROMPT" "$RAW_TEXT")
+            
+            # Clean up potential markdown formatting from AI response
+            AI_OUT=$(echo "$AI_OUT" | sed 's/^```json//g' | sed 's/^```//g')
+            
+            local SUMMARY=$(echo "$AI_OUT" | jq -r '.summary' 2>/dev/null)
+            local TAGS=$(echo "$AI_OUT" | jq -r '.tags' 2>/dev/null)
+            
+            if [[ -z "$SUMMARY" || "$SUMMARY" == "null" ]]; then 
+                SUMMARY="AI Analysis Failed"
+                TAGS="#link"
+            fi
+
+            # Clean input for SQL (Remove tabs/newlines from input before saving)
+            SUMMARY="${SUMMARY//[$'\t\r\n']/ }"
+            TAGS="${TAGS//[$'\t\r\n']/ }"
+            TITLE="${TITLE//[$'\t\r\n']/ }"
+
+            jam -e "INSERT INTO utils.bookmarks (url, title, summary, tags) VALUES ('${ARG//\'/\'\'}', '${TITLE//\'/\'\'}', '${SUMMARY//\'/\'\'}', '${TAGS//\'/\'\'}');"
+            
+            echo "✅ Saved: $TITLE"
+            echo "📝 $SUMMARY"
+            echo "🏷️  $TAGS"
+            ;;
+
+        ls)
+            local QUERY="SELECT id, REPLACE(REPLACE(title, '\n', ' '), '\t', ' '), REPLACE(REPLACE(tags, '\n', ' '), '\t', ' '), REPLACE(REPLACE(summary, '\n', ' '), '\t', ' '), url FROM utils.bookmarks ORDER BY id DESC;"
+            local DATA=$(jam -N -B -e "$QUERY")
+            
+            if [ -z "$DATA" ]; then echo "📭 No bookmarks found."; return; fi
+
+            # We pass the full line {} to awk and split by \t explicitly.
+            # $3 = Tags, $4 = Summary, $5 = URL
+            # We use single quotes for the awk script to prevent shell interference.
+            local PREVIEW_CMD="echo {} | awk -F'\t' '{
+                print \"\n🏷️  \033[1;36mTags:\033[0m \" \$3;
+                print \"\n📝 \033[1;33mSummary:\033[0m\";
+                print \$4;
+                print \"\n🔗 \033[1;34mURL:\033[0m\n\" \$5
+            }'"
+
+            local SELECTED_URL=$(echo "$DATA" | fzf \
+                --height 60% --layout=reverse --border --header="🔖 Smart Bookmarks" \
+                --delimiter='\t' \
+                --with-nth=2,3 \
+                --preview "$PREVIEW_CMD" \
+                --preview-window="right:65%:wrap" \
+                | awk -F'\t' '{print $5}')
+            
+            if [ -n "$SELECTED_URL" ]; then
+                echo "🚀 Opening: $SELECTED_URL"
+                xdg-open "$SELECTED_URL" >/dev/null 2>&1
+            fi
+            ;;
+
+        rm)
+            local ID=$ARG
+            if [ -z "$ID" ]; then
+                  ID=$(jam -N -B -e "SELECT id, title FROM utils.bookmarks;" | \
+                      fzf --height 40% --layout=reverse --header="Select to DELETE" \
+                          --preview "echo '🗑️  Delete this bookmark?'" \
+                          --preview-window="right:40%:wrap" \
+                      | awk '{print $1}')
+            fi
+            
+            if [ -n "$ID" ]; then
+                jam -e "DELETE FROM utils.bookmarks WHERE id=$ID;"
+                echo "🗑️  Deleted bookmark #$ID."
+            fi
+            ;;
+
+        *) echo "Usage: mark {add <url> | ls | rm <id> | init}" ;;
+    esac
+}
+
 # ==========================================
 #  OCI LAUNCHER (The Master Menu)
 # ==========================================
