@@ -67,3 +67,62 @@ notify() {
 
 alias alert=notify
 
+
+# ==========================================
+#  TUNNEL (Public Localhost)
+# ==========================================
+# Usage: tunnel 3000
+#        tunnel 8080
+tunnel() {
+    emulate -L zsh
+    unsetopt monitor
+
+    local PORT=$1
+    if [ -z "$PORT" ]; then echo "Usage: tunnel <port>"; return 1; fi
+
+    local TUNNEL_NAME="void-proxy"
+    local URL="https://demo.tamatar.dev"
+    local LOG_FILE="/tmp/tmt_tunnel.log"
+
+    # --- CLEANUP HANDLER ---
+    # This function runs when you hit Ctrl+C
+    _tunnel_cleanup() {
+        echo -e "\n🔌 Disconnecting..."
+        # Kill the specific background job PID
+        if [ -n "$PID" ]; then
+            kill "$PID" 2>/dev/null
+        fi
+        rm -f "$LOG_FILE"
+    }
+    trap _tunnel_cleanup SIGINT SIGTERM
+
+    echo "🚇 Routing $URL -> localhost:$PORT..."
+
+    # 1. Start Tunnel in Background
+    rm -f "$LOG_FILE"
+    cloudflared tunnel run --url http://localhost:$PORT $TUNNEL_NAME > "$LOG_FILE" 2>&1 &
+    local PID=$!
+
+
+    # 2. Health Check (Give it 2 seconds)
+    sleep 2
+    if ! kill -0 $PID 2>/dev/null; then
+        echo "❌ Tunnel died immediately. Logs:"
+        cat "$LOG_FILE"
+        # Manually trigger cleanup since trap won't fire on return
+        rm -f "$LOG_FILE"
+        return 1
+    fi
+
+    # 3. Success Output
+    if command -v wl-copy &>/dev/null; then echo -n "$URL" | wl-copy; fi
+
+    echo -e "🚀 \033[1;32mONLINE\033[0m"
+    echo -e "🔗 \033[1;34m$URL\033[0m (Copied)"
+    echo "⌨️  Press Ctrl+C to stop"
+
+    # This allows the shell to process the trap immediately when you hit Ctrl+C
+    while kill -0 $PID 2>/dev/null; do
+        sleep 0.5
+    done
+}
