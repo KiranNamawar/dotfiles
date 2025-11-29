@@ -120,6 +120,36 @@ _call_gemini() {
     echo "$answer"
 }
 
+# ------------------------------------------
+# EMBEDDING HELPER (Text -> Vector)
+# ------------------------------------------
+_get_embedding() {
+    local text="$1"
+    local api_key=$(_get_key "GEMINI_API_KEY")
+    
+    # 1. Construct JSON
+    # Truncate text to ~2000 chars to stay safe within limits
+    local clean_text=$(echo "$text" | tr -d '\n"' | head -c 2000)
+    
+    local payload=$(jq -n \
+        --arg t "$clean_text" \
+        '{ model: "models/text-embedding-004", content: { parts: [{ text: $t }] } }')
+
+    # 2. Call API
+    local response=$(curl -s -X POST \
+        "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=$api_key" \
+        -H "Content-Type: application/json" \
+        -d "$payload")
+
+    # 3. Parse Vector
+    # Output must be formatted for Postgres: [0.1,0.2,-0.1,...]
+    local vector=$(echo "$response" | jq -r '.embedding.values | @json')
+    
+    if [[ "$vector" == "null" || -z "$vector" ]]; then
+        return 1
+    fi
+    echo "$vector"
+}
 
 # --- PUBLIC FUNCTIONS ---
 
@@ -222,6 +252,8 @@ gcmt() {
     if git diff --cached --quiet; then echo "⚠️  No staged changes."; return 1; fi
 
     local branch=$(git branch --show-current)
+    local repo_root=$(git rev-parse --show-toplevel)
+    local repo_name=$(basename "$repo_root")
     local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 100000)
     local sys="You are an expert Git Release Manager who writes high-quality Semantic Commit Messages. 
       Your output MUST adhere strictly to the following rules:
@@ -244,7 +276,18 @@ gcmt() {
     echo -n "🚀 Commit? [y/n/e]: "
     read -r choice
     case "$choice" in
-        y|Y) git commit -m "$msg" ;;
+        y|Y) 
+          if git commit -m "$msg"; then
+                # --- INTEGRATION: Recall ---
+                if command -v recall &>/dev/null; then
+                    # Content: [Project] Message (Branch)
+                    # Source: Git: Project
+                    local memory="[$repo_name] $msg (Branch: $branch)"
+                    recall add "$memory" "Git: $repo_name" >/dev/null 2>&1
+                    echo "🧠 Commit memorized."
+                fi
+            fi
+            ;;
         e|E) git commit -m "$msg" -e ;;
         *) echo "❌ Aborted." ;;
     esac
@@ -624,6 +667,46 @@ search() {
     esac
 }
 
+# ==========================================
+# RASK (Retrieval Augmented Ask)
+# ==========================================
+# Usage: rask "What is the project X config?"
+rask() {
+    local QUERY="$1"
+    if [ -z "$QUERY" ]; then echo "Usage: rask <question>"; return 1; fi
+
+    # 1. Search Memory (Recall)
+    echo -n "🧠 Recalling..." >&2
+    
+    # We need a raw version of recall search here.
+    # We embed the query manually to get the vector.
+    local Q_VEC=$(_get_embedding "$QUERY")
+    
+    # Fetch Top 3 matches from Azure
+    local CONTEXT=$(silo "SELECT content FROM items ORDER BY embedding <=> '$Q_VEC' LIMIT 3;" | grep -v "rows)" | grep -v "^--" | tr '\n' ' ')
+    
+    if [ -z "$CONTEXT" ]; then
+        echo " (No memory found)" >&2
+        CONTEXT="No relevant memory found."
+    else
+        echo " (Found context)" >&2
+    fi
+
+    # 2. Construct Prompt
+    local SYS_PROMPT="You are a Helpful Assistant with access to the user's external memory.
+    
+    [[ MEMORY CONTEXT ]]
+    $CONTEXT
+    
+    Instructions:
+    Answer the user's question using the Memory Context above. 
+    If the answer is in the memory, cite it. 
+    If not, answer generally but mention you didn't find it in memory."
+
+    # 3. Call AI (Groq is fast)
+    local RESULT=$(_call_groq "$SYS_PROMPT" "$QUERY" "llama-3.1-8b-instant")
+    _render_output "$RESULT"
+}
 
 # ==========================================
 #  AI LAUNCHER (The Master Menu)

@@ -28,29 +28,66 @@ _az_check() {
 # Usage: silo [sql_command]
 silo() {
     _az_check
-
-    # Load secrets if variables are empty
     if [ -z "$SILO_PASS" ]; then source ~/.azure/.secrets.sh; fi
 
-    # Set defaults if variables are still empty
-    : ${SILO_HOST:="silo.postgres.database.azure.com"}
-    : ${SILO_USER:="adminuser"}
-    : ${SILO_DB:="postgres"}
+    # BRIDGE CONFIG
+    local SSH_USER="kiran"
+    local SSH_HOST="station"
+    local LOCAL_PORT="6543"
 
-    # Check for psql client
-    if ! command -v psql &> /dev/null; then
-        echo "❌ Error: 'psql' is not installed. Run: sudo dnf install postgresql"
-        return 1
+    # DB CONFIG
+    local DB_HOST="silo.postgres.database.azure.com"
+    local DB_USER="adminuser"
+    local CURRENT_DB="${SILO_DB:-postgres}"
+
+    if ! command -v psql &> /dev/null; then echo "❌ Error: 'psql' is missing."; return 1; fi
+
+    # Tunnel Logic (Same as before)
+    if ! lsof -i :$LOCAL_PORT &>/dev/null; then
+        echo "🚇 Opening tunnel via $SSH_HOST..."
+        ssh -f -N -L $LOCAL_PORT:$DB_HOST:5432 $SSH_USER@$SSH_HOST
+        sleep 1
     fi
 
-    # Connection Logic
-    if [ -z "$1" ]; then
-        # Interactive Shell
-        PGPASSWORD="$SILO_PASS" psql -h "$SILO_HOST" -U "$SILO_USER" -d "$SILO_DB" -p 5432
-    else
-        # One-off command
-        PGPASSWORD="$SILO_PASS" psql -h "$SILO_HOST" -U "$SILO_USER" -d "$SILO_DB" -p 5432 -c "$1"
-    fi
+    local CMD="$1"
+    export PGPASSWORD="$SILO_PASS"
+
+    case "$CMD" in
+        backup)
+            # Usage: silo backup <db_name>
+            # If arg provided, use it. Else use CURRENT_DB
+            local TARGET="${2:-$CURRENT_DB}"
+            echo "📦 Dumping '$TARGET'..." >&2
+            pg_dump -h localhost -p $LOCAL_PORT -U "$DB_USER" -d "$TARGET" --no-owner --no-acl
+            ;;
+
+        restore)
+            local TARGET="$2"
+            if [ -z "$TARGET" ]; then echo "Usage: silo restore <db>"; return 1; fi
+            echo -n "⚠️  DANGER: Overwrite '$TARGET'? [y/N] "
+            read -r confirm
+            if [[ "$confirm" == "y" ]]; then
+                psql -h localhost -p $LOCAL_PORT -U "$DB_USER" -d "$TARGET"
+            else
+                echo "❌ Aborted."
+            fi
+            ;;
+
+        *)
+            if [ -z "$1" ]; then
+                # Interactive
+                psql -h localhost -p $LOCAL_PORT -U "$DB_USER" -d "$CURRENT_DB"
+            else
+                # One-off
+                if [[ "$1" =~ "(DELETE|DROP|TRUNCATE)" ]]; then
+                    echo -n "⚠️  Dangerous command. Execute? [y/N] "
+                    read -r confirm
+                    [[ "$confirm" != "y" ]] && echo "❌ Aborted." && return 1
+                fi
+                psql -h localhost -p $LOCAL_PORT -U "$DB_USER" -d "$CURRENT_DB" -c "$1"
+            fi
+            ;;
+    esac
 }
 
 # ------------------------------------------
@@ -192,6 +229,112 @@ ledger() {
         # One-off command
         usql "$URI" -c "$1"
     fi
+}
+
+# ==========================================
+#  RECALL (Semantic Search / Vector DB)
+# ==========================================
+# Usage: recall "how do i fix wifi?"
+#        recall add "Restart router to fix wifi" "manual.md"
+recall() {
+    local CMD="$1"
+    local ARG2="$2"
+    local ARG3="$3"
+
+    # Config: Point specifically to the 'memory' database
+    export SILO_DB="memory"
+
+    if ! command -v _get_embedding &>/dev/null; then
+        [ -f ~/.dotfiles/zsh/ai_functions.zsh ] && source ~/.dotfiles/zsh/ai_functions.zsh
+    fi
+
+    case "$CMD" in
+            # Clean / Wipe
+        clean|wipe)
+            echo -n "⚠️  DANGER: Wipe ALL memory? [y/N] "
+            read -r confirm
+            if [[ "$confirm" == "y" ]]; then
+                silo "TRUNCATE TABLE items;"
+                echo "🧹 Memory wiped clean."
+            else
+                echo "❌ Aborted."
+            fi
+            ;;
+
+            # List recent memories (Debugging)
+        ls|log)
+            echo "🔍 Recent Memories:"
+            silo "SELECT id, left(content, 60) as preview, source FROM items ORDER BY id DESC LIMIT 10;"
+            ;;
+
+            # Add Memory
+        add)
+            if [[ -z "$ARG2" ]]; then echo "Usage: recall add <text> [source]"; return 1; fi
+            local INPUT="$ARG2"
+            local SOURCE="${ARG3:-manual}"
+
+            echo -n "🧠 Embedding..."
+            local VECTOR=$(_get_embedding "$INPUT")
+
+            if [[ -z "$VECTOR" ]]; then echo "❌ Failed to generate embedding."; return 1; fi
+
+            echo -n " 💾 Storing..."
+            local SAFE_CONTENT="${INPUT//\'/\'\'}"
+            local SAFE_SOURCE="${SOURCE//\'/\'\'}"
+
+            if ERROR=$(silo "INSERT INTO items (content, source, embedding) VALUES ('$SAFE_CONTENT', '$SAFE_SOURCE', '$VECTOR');" 2>&1); then
+                echo " ✅ Memorized."
+            else
+                echo " ❌ Database Error:"
+                echo "$ERROR"
+                return 1
+            fi
+            ;;
+
+            # Search (Default)
+        *)
+            if [[ -z "$CMD" ]]; then echo "Usage: recall <query> | add | ls | clean"; return 1; fi
+
+            echo -n "🤔 Thinking..." >&2
+            local QUERY_VECTOR=$(_get_embedding "$CMD")
+
+            if [[ -z "$QUERY_VECTOR" ]]; then echo "❌ API Error"; return 1; fi
+
+            echo -e "\r🔍 \033[1;33mRecall Results:\033[0m" >&2
+
+            local SQL="SELECT source, content, 1 - (embedding <=> '$QUERY_VECTOR') AS similarity
+                       FROM items
+                       ORDER BY embedding <=> '$QUERY_VECTOR'
+                       LIMIT 5;"
+
+            silo "$SQL" | \
+                grep -v "rows)" | grep -v "^--" | grep -v "^source" | \
+            awk -F '|' '{
+                score = $3 * 100;
+                if (score > 60) printf "\n👉 \033[1;36m%s\033[0m (Match: %.0f%%)\n   %s\n", $1, score, $2
+            }'
+            ;;
+    esac
+}
+
+# ==========================================
+# REM (Remember Command)
+# ==========================================
+# Usage: rem "description" "command"
+#        rem "description" (Saves last command)
+rem() {
+    local DESC="$1"
+    local CMD="$2"
+
+    if [ -z "$DESC" ]; then echo "Usage: rem <description> [command]"; return 1; fi
+
+    # If no command provided, grab the last one from history
+    if [ -z "$CMD" ]; then
+        CMD=$(fc -ln -1)
+    fi
+
+    echo "💾 Remembering: $CMD"
+    recall add "Command: $CMD. Description: $DESC" "shell_history"
 }
 
 # ------------------------------------------

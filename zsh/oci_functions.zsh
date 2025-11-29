@@ -451,6 +451,27 @@ notes() {
             xdg-open "obsidian://open?path=$NOTES_PATH" >/dev/null 2>&1 &|
             ;;
 
+        index|memorize)
+            echo "🧠 Indexing Brain to Azure Vector DB..."
+            
+            # Find all markdown files (limit to last 7 days to be fast, or remove mtime for full scan)
+            # You can remove '-mtime -7' to index EVERYTHING (might take a while)
+            find "$NOTES_PATH" -name "*.md" -mtime -7 | while read file; do
+                local filename=$(basename "$file")
+                echo "   Reading: $filename"
+                
+                # Content: First 1000 chars (Embeddings have limits)
+                local content=$(head -c 1000 "$file")
+                
+                # Send to Recall (Silence output to keep it clean)
+                # We use the filename as the 'Source'
+                if recall add "Note: $filename. Content: $content" "Obsidian" >/dev/null 2>&1; then
+                    echo "   ✅ Indexed: $filename"
+                else
+                    echo "   ❌ Failed: $filename"
+                fi
+            done
+            ;;
         *) echo "Usage: notes {up | down | status | open}" ;;
     esac
 }
@@ -926,6 +947,13 @@ mark() {
                 TAGS="#link"
             fi
 
+            # --- Inject into Vector Memory ---
+            if command -v recall &>/dev/null; then
+                echo "🧠 Memorizing..."
+                # We execute directly. If it fails, we see the error.
+                recall add "Bookmark: $TITLE. $SUMMARY $TAGS" "$ARG"
+            fi
+
             # Clean input for SQL (Remove tabs/newlines from input before saving)
             SUMMARY="${SUMMARY//[$'\t\r\n']/ }"
             TAGS="${TAGS//[$'\t\r\n']/ }"
@@ -985,6 +1013,110 @@ mark() {
             ;;
 
         *) echo "Usage: mark {add <url> | ls | rm <id> | init}" ;;
+    esac
+}
+
+# ==========================================
+# 13. CLIP (Cloud Clipboard)
+# ==========================================
+# Usage: echo "foo" | clip       (Copy)
+#        clip copy "foo"         (Copy arg)
+#        clip paste              (Paste latest)
+#        clip ls                 (History)
+clip() {
+    local CMD=$1
+    local CONTENT=""
+
+    # 0. INIT (Run once)
+    _clip_init() {
+        jam -e "CREATE TABLE IF NOT EXISTS utils.clipboard (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            content TEXT,
+            device VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );" >/dev/null 2>&1
+    }
+
+    # Helper: Detect Device Name
+    local DEVICE_NAME=$(hostname)
+
+    case "$CMD" in
+        # COPY: Handles piped input OR arguments
+        c|cp|copy)
+            _clip_init
+            
+            # Check if input is piped
+            if [ ! -t 0 ]; then
+                CONTENT=$(cat)
+            else
+                CONTENT="${@:2}"
+            fi
+
+            if [ -z "$CONTENT" ]; then echo "Usage: echo 'text' | clip OR clip copy 'text'"; return 1; fi
+
+            # Escape for SQL
+            local SAFE_CONTENT="${CONTENT//\'/\'\'}"
+            
+            jam -e "INSERT INTO utils.clipboard (content, device) VALUES ('$SAFE_CONTENT', '$DEVICE_NAME');"
+            echo "✂️  Copied to Cloud Clipboard."
+            ;;
+
+        # PASTE: Output the most recent item
+        p|paste)
+            # -N (Skip headers), -B (Batch/Tab separated)
+            jam -N -B -e "SELECT content FROM utils.clipboard ORDER BY id DESC LIMIT 1;"
+            ;;
+
+        # LIST: Interactive History
+        ls|history)
+            _clip_init
+            local DATA=$(jam -N -B -e "SELECT id, device, content, created_at FROM utils.clipboard ORDER BY id DESC LIMIT 20;")
+            
+            if [ -z "$DATA" ]; then echo "📭 Clipboard empty."; return; fi
+
+            # FZF: Show Device & Content snippet. Preview full content.
+            # Columns: 1=ID, 2=Device, 3=Content, 4=Time
+            local SELECTED=$(echo "$DATA" | fzf \
+                --height 40% --layout=reverse --border --header="📋 Cloud Clipboard" \
+                --delimiter='\t' \
+                --with-nth=2,3 \
+                --preview "echo {3}" \
+                --preview-window="wrap" \
+                | cut -f3) # Select the content column directly
+            
+            if [ -n "$SELECTED" ]; then
+                # Copy to local system clipboard if available
+                if command -v wl-copy &>/dev/null; then
+                    echo -n "$SELECTED" | wl-copy
+                    echo "✅ Copied to local clipboard."
+                else
+                    echo "$SELECTED"
+                fi
+            fi
+            ;;
+        
+        mem|remember)
+            if [ ! -t 0 ]; then CONTENT=$(cat); else CONTENT="${@:2}"; fi
+            if [ -z "$CONTENT" ]; then echo "Usage: echo text | clip mem"; return 1; fi
+            
+            echo "🧠 Sending to Long-Term Memory..."
+            recall add "$CONTENT" "Clipboard"
+            ;;
+
+        # CLEAR
+        clean|clear)
+            jam -e "TRUNCATE TABLE utils.clipboard;"
+            echo "🧹 Clipboard wiped."
+            ;;
+
+        *) 
+            # Smart Default: If pipe, copy. If no args, ls.
+            if [ ! -t 0 ]; then
+                clip copy
+            else
+                clip ls
+            fi
+            ;;
     esac
 }
 
