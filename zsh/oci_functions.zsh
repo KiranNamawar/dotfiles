@@ -591,7 +591,7 @@ stock() {
       DOC_PATH="${FULL_KEY#*.}"
     else
       DOC_ID="$FULL_KEY"
-      DOC_PATH="v"
+      DOC_PATH=""
     fi
   }
 
@@ -606,24 +606,43 @@ stock() {
       fi
 
       _parse_key 
-      echo "📦 Stocking '$DOC_PATH' into '$DOC_ID'..." >&2
-
+      
+      # Base64 Encode to handle newlines/quotes safely
       local B64_VAL=$(echo -n "$INPUT_VAL" | base64 | tr -d '\n')
+
+      echo "📦 Stocking into '$DOC_ID'..." >&2
 
       local OUT=$(_mongo_exec "
         var valString = Buffer.from('$B64_VAL', 'base64').toString('utf-8');
         var finalVal = valString;
-        try { finalVal = JSON.parse(valString); } catch(e) {}
+        try { finalVal = JSON.parse(valString); } catch(e) {
+             // Type Inference
+             if(finalVal === 'true') finalVal = true;
+             else if(finalVal === 'false') finalVal = false;
+             else if(!isNaN(finalVal) && finalVal.trim() !== '') finalVal = Number(finalVal);
+        }
         
-        db.getSiblingDB('utils').stock.updateOne(
-          {_id: '$DOC_ID'}, 
-          {\$set: { '$DOC_PATH': finalVal, updated: new Date() }}, 
-          {upsert: true}
-        )
+        var query = {_id: '$DOC_ID'};
+        
+        if ('$DOC_PATH' === '') {
+             // FIX: Root Replacement (Flat Structure)
+             // We ensure 'finalVal' is an object if we are replacing the root
+             if (typeof finalVal !== 'object' || finalVal === null) {
+                 finalVal = { 'value': finalVal };
+             }
+             finalVal.updated = new Date();
+             db.getSiblingDB('utils').stock.replaceOne(query, finalVal, {upsert: true});
+        } else {
+             // FIX: Partial Update at Root
+             var setObj = {};
+             setObj['$DOC_PATH'] = finalVal;
+             setObj.updated = new Date();
+             db.getSiblingDB('utils').stock.updateOne(query, {\$set: setObj}, {upsert: true});
+        }
       ")
       
       if [[ "$OUT" == *"acknowledged"* ]]; then
-        echo "✅ Stocked: [$FULL_KEY]"
+        echo "✅ Saved."
       else
         echo "❌ Failed: $OUT"
         return 1
@@ -631,39 +650,27 @@ stock() {
       ;;
 
     get)
-      # Auto-Select (Menu)
-      if [ -z "$FULL_KEY" ]; then
-         stock ls
-         return
-      fi
+      [ -z "$FULL_KEY" ] && stock ls && return
 
-      local FILTER="$3"
-
-      # Fetch Data
-      if [[ "$FULL_KEY" == *.* ]]; then
-        _parse_key
-        local JS_QUERY="
+      _parse_key
+      
+      local JS_QUERY="
           var doc = db.getSiblingDB('utils').stock.findOne({_id: '$DOC_ID'});
-          if(!doc) print('NULL');
-          else {
-            var path = '$DOC_PATH'.split('.');
-            var res = doc;
-            for(var i=0; i<path.length; i++) {
-               if(res === undefined || res === null) break;
-               res = res[path[i]];
-            }
-            if(res === undefined) print('NULL');
-            else if(typeof res === 'object') print(JSON.stringify(res));
-            else print(res);
+          if (!doc) {
+             print('NULL');
+          } else {
+             var res = doc;
+             var path = '$DOC_PATH';
+             if (path) {
+                 path.split('.').forEach(p => { 
+                    if(res) res = res[p]; 
+                 });
+             }
+             if (res === undefined) print('NULL');
+             else if (typeof res === 'object') print(JSON.stringify(res));
+             else print(res);
           }
-        "
-      else
-        local JS_QUERY="
-           var doc = db.getSiblingDB('utils').stock.findOne({_id: '$FULL_KEY'}); 
-           if(!doc) print('NULL'); 
-           else { delete doc._id; delete doc.updated; print(JSON.stringify(doc)); }
-        "
-      fi
+      "
 
       local RESULT=$(_mongo_exec "$JS_QUERY")
 
@@ -672,20 +679,15 @@ stock() {
         return 1
       fi
 
-      # --- INTEGRATION: If no filter, use JQE ---
-      if [ -z "$FILTER" ]; then
-         # Check if it looks like a JSON object/array
-         if [[ "$RESULT" == \{* ]] || [[ "$RESULT" == \[* ]]; then
-            echo "$RESULT" | jqe
-         else
-            echo "$RESULT" # It's just a string/number
-         fi
+      if [[ "$RESULT" == \{* ]] || [[ "$RESULT" == \[* ]]; then
+         echo "$RESULT" | jqe
       else
-         echo "$RESULT" | jq -r "$FILTER" 2>/dev/null
+         echo "$RESULT"
       fi
       ;;
 
     ls)
+      # Uses Base64 to prevent newlines breaking the list
       local DATA=$(_mongo_exec "db.getSiblingDB('utils').stock.find({}).forEach(doc => { 
           var id = doc._id; 
           delete doc._id; delete doc.updated; 
@@ -694,14 +696,13 @@ stock() {
       
       if command -v fzf &> /dev/null; then
         local SELECTED=$(echo "$DATA" | fzf \
-            --height 40% --layout=reverse --border --header="Select Stock Item" \
+            --height 40% --layout=reverse --border --header="📦 Stock Explorer" \
             --delimiter=$'\t' --with-nth=1 \
             --preview='echo {2} | base64 --decode | jq .' \
             --preview-window='right:60%:wrap')
 
         if [ -n "$SELECTED" ]; then
            local KEY=$(echo "$SELECTED" | cut -f1)
-           # If selected, run 'stock get' on it to trigger the JQE explorer
            stock get "$KEY"
         fi
       else
@@ -712,16 +713,18 @@ stock() {
     rm)
       if [ -z "$FULL_KEY" ]; then echo "Usage: stock rm <key.path>"; return 1; fi
       _parse_key
-      if [[ "$DOC_PATH" == "v" ]]; then
+      
+      echo "🗑️  Deleting '$FULL_KEY'..."
+      if [ -z "$DOC_PATH" ]; then
          _mongo_exec "db.getSiblingDB('utils').stock.deleteOne({_id: '$DOC_ID'})" > /dev/null
       else
          _mongo_exec "db.getSiblingDB('utils').stock.updateOne({_id: '$DOC_ID'}, {\$unset: {'$DOC_PATH': 1}})" > /dev/null
       fi
-      echo "🗑️  Processed [$FULL_KEY]"
+      echo "✅ Gone."
       ;;
 
     *)
-      echo "Usage: stock {set <key.path> <val> | get <key.path> | ls | rm <key>}"
+      echo "Usage: stock {set | get | ls | rm}"
       ;;
   esac
 }
