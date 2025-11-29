@@ -255,14 +255,12 @@ gcmt() {
     local repo_root=$(git rev-parse --show-toplevel)
     local repo_name=$(basename "$repo_root")
     local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 100000)
-    local sys="You are an expert Git Release Manager who writes high-quality Semantic Commit Messages. 
-      Your output MUST adhere strictly to the following rules:
-      1.  **Format:** <type>(<scope>): <subject> followed by an optional blank line and a detailed body.
-      2.  **Style:** Use the Imperative Mood (e.g., 'Fix bug', not 'Fixed bug').
-      3.  **Length/Detail:**
-          * For **large, complex, or multi-component** changes, include a **detailed, paragraph-based message body** after the subject line explaining the *why* and *how*. Use markdown bullet points in the body if needed.
-          * For **small, simple** changes, output only the single line <type>(<scope>): <subject>.
-      4.  **Output:** Provide ONLY the raw, unquoted commit message string. Do NOT add any conversational text or explanation."
+    local sys="You are a Semantic Git Commit Writer. 
+    Rules:
+    1. First Line: <type>(<scope>): <subject> (Max 50 chars, Imperative mood).
+    2. Body: Optional. Only add if changes are complex.
+    3. Body Limit: Max 3 bullet points. Be extremely concise.
+    4. Output: ONLY the raw commit message string."
 
     local user_prompt="Current Branch: $branch\n\nCode Changes:\n$diff_content"
     
@@ -283,7 +281,7 @@ gcmt() {
                     # Content: [Project] Message (Branch)
                     # Source: Git: Project
                     local memory="[$repo_name] $msg (Branch: $branch)"
-                    recall add "$memory" "Git: $repo_name" >/dev/null 2>&1
+                    ( recall add "$memory" "Git: $repo_name" >/dev/null 2>&1 ) &|
                     echo "🧠 Commit memorized."
                 fi
             fi
