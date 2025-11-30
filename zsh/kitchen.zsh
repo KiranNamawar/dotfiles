@@ -120,3 +120,38 @@ sys() {
     echo -e "⚡ Local (Void)...  \033[1;32mONLINE\033[0m"
     echo ""
 }
+
+# ==========================================
+# TAMATAR OS (Manual)
+# ==========================================
+tamatar() {
+    echo -e "\n🍅 \033[1;31mTAMATAR OS v2.0\033[0m"
+    echo -e "\033[1;33m[ BRAIN ]\033[0m"
+    echo "  mark add <url>       :: Save & summarize bookmark (OCI + Vector)"
+    echo "  recall <query>       :: Semantic search (Azure Vector DB)"
+    echo "  rask <question>      :: AI Chat with access to your memory"
+    echo "  rem <desc> <cmd>     :: Remember a shell command"
+    echo "  read-pdf <file>      :: Index PDF content"
+    echo "  load-env             :: Index project .memory file"
+
+    echo -e "\n\033[1;33m[ CLOUD ]\033[0m"
+    echo "  basket ls/push/pull  :: Private Storage (OCI)"
+    echo "  drop <file>          :: Public File Share (OCI + Edge)"
+    echo "  site deploy <dir>    :: Static Web Hosting (OCI + Edge)"
+    echo "  buckets ls/mk/nuke   :: Infrastructure Manager"
+    echo "  tunnel <port>        :: Public Localhost (demo.tamatar.dev)"
+
+    echo -e "\n\033[1;33m[ DATA ]\033[0m"
+    echo "  jam <sql>            :: MySQL Database (OCI)"
+    echo "  silo <sql>           :: Postgres Database (Azure)"
+    echo "  stock set/get/ls     :: NoSQL JSON Store (OCI)"
+    echo "  kv set/get           :: Key-Value Store"
+    echo "  vault add/peek       :: Secret Manager"
+    echo "  clip copy/paste      :: Cloud Clipboard"
+
+    echo -e "\n\033[1;33m[ LOCAL ]\033[0m"
+    echo "  notes up/down        :: Sync Obsidian to Cloud"
+    echo "  kit                  :: Interactive Dashboard"
+    echo "  sys                  :: System Status Check"
+    echo ""
+}

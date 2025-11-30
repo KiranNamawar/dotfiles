@@ -240,8 +240,7 @@ recall() {
     local CMD="$1"
     local ARG2="$2"
     local ARG3="$3"
-
-    # Config: Point specifically to the 'memory' database
+    
     export SILO_DB="memory"
 
     if ! command -v _get_embedding &>/dev/null; then
@@ -249,7 +248,6 @@ recall() {
     fi
 
     case "$CMD" in
-            # Clean / Wipe
         clean|wipe)
             echo -n "⚠️  DANGER: Wipe ALL memory? [y/N] "
             read -r confirm
@@ -261,28 +259,35 @@ recall() {
             fi
             ;;
 
-            # List recent memories (Debugging)
         ls|log)
             echo "🔍 Recent Memories:"
             silo "SELECT id, left(content, 60) as preview, source FROM items ORDER BY id DESC LIMIT 10;"
             ;;
 
-            # Add Memory
         add)
             if [[ -z "$ARG2" ]]; then echo "Usage: recall add <text> [source]"; return 1; fi
             local INPUT="$ARG2"
             local SOURCE="${ARG3:-manual}"
-
+            
             echo -n "🧠 Embedding..."
             local VECTOR=$(_get_embedding "$INPUT")
-
+            
             if [[ -z "$VECTOR" ]]; then echo "❌ Failed to generate embedding."; return 1; fi
-
+            
             echo -n " 💾 Storing..."
-            local SAFE_CONTENT="${INPUT//\'/\'\'}"
-            local SAFE_SOURCE="${SOURCE//\'/\'\'}"
-
-            if ERROR=$(silo "INSERT INTO items (content, source, embedding) VALUES ('$SAFE_CONTENT', '$SAFE_SOURCE', '$VECTOR');" 2>&1); then
+            
+            local B64_CONTENT=$(echo -n "$INPUT" | base64 | tr -d '\n')
+            local B64_SOURCE=$(echo -n "$SOURCE" | base64 | tr -d '\n')
+            
+            # Use Postgres 'convert_from(decode(..., 'base64'), 'UTF8')'
+            local SQL="INSERT INTO items (content, source, embedding) 
+                       VALUES (
+                           convert_from(decode('$B64_CONTENT', 'base64'), 'UTF8'), 
+                           convert_from(decode('$B64_SOURCE', 'base64'), 'UTF8'), 
+                           '$VECTOR'
+                       );"
+            
+            if ERROR=$(silo "$SQL" 2>&1); then
                 echo " ✅ Memorized."
             else
                 echo " ❌ Database Error:"
@@ -291,27 +296,26 @@ recall() {
             fi
             ;;
 
-            # Search (Default)
         *)
             if [[ -z "$CMD" ]]; then echo "Usage: recall <query> | add | ls | clean"; return 1; fi
-
+            
             echo -n "🤔 Thinking..." >&2
             local QUERY_VECTOR=$(_get_embedding "$CMD")
-
+            
             if [[ -z "$QUERY_VECTOR" ]]; then echo "❌ API Error"; return 1; fi
-
+            
             echo -e "\r🔍 \033[1;33mRecall Results:\033[0m" >&2
 
-            local SQL="SELECT source, content, 1 - (embedding <=> '$QUERY_VECTOR') AS similarity
-                       FROM items
-                       ORDER BY embedding <=> '$QUERY_VECTOR'
+            local SQL="SELECT source, content, 1 - (embedding <=> '$QUERY_VECTOR') AS similarity 
+                       FROM items 
+                       ORDER BY embedding <=> '$QUERY_VECTOR' 
                        LIMIT 5;"
-
+            
             silo "$SQL" | \
-                grep -v "rows)" | grep -v "^--" | grep -v "^source" | \
-            awk -F '|' '{
+            grep -v "rows)" | grep -v "^--" | grep -v "^source" | \
+            awk -F '|' '{ 
                 score = $3 * 100;
-                if (score > 60) printf "\n👉 \033[1;36m%s\033[0m (Match: %.0f%%)\n   %s\n", $1, score, $2
+                if (score > 30) printf "\n👉 \033[1;36m%s\033[0m (Match: %.0f%%)\n   %s\n", $1, score, $2 
             }'
             ;;
     esac
@@ -335,6 +339,79 @@ rem() {
 
     echo "💾 Remembering: $CMD"
     recall add "Command: $CMD. Description: $DESC" "shell_history"
+}
+
+# ==========================================
+# OOPS (Error & Solution Memory)
+# ==========================================
+oops() {
+    local ERROR="$1"
+    local FIX="$2"
+    if [ -z "$FIX" ]; then echo "Usage: oops <error_msg> <fix_command>"; return 1; fi
+
+    echo "💊 Remembering Fix..."
+    # Format: [SOLVED] Error... -> Solution...
+    recall add "[SOLVED] Issue: $ERROR. Fix: $FIX" "Troubleshooting"
+}
+
+# ==========================================
+# READ-PDF (Ingest PDF to Brain)
+# ==========================================
+read-pdf() {
+    local FILE="$1"
+    if [ ! -f "$FILE" ]; then echo "Usage: read-pdf <file.pdf>"; return 1; fi
+
+    echo "📖 Reading '$FILE'..."
+    # Convert PDF to text
+    local TEXT=$(pdftotext "$FILE" -)
+
+    # Chunking: Gemini can take ~1MB text, but let's take the first 4000 chars
+    # to capture the abstract/summary for efficient embedding.
+    local CHUNK=$(echo "$TEXT" | head -c 4000)
+
+    echo "🧠 Memorizing..."
+    recall add "Document: $(basename "$FILE"). Content: $CHUNK" "Library"
+}
+
+# ==========================================
+# LOAD-ENV (Project Context)
+# ==========================================
+load-env() {
+    if [ ! -f .memory ]; then 
+        echo "❌ No .memory file found in current directory."
+        return 1
+    fi
+    
+    local PROJ=$(basename "$PWD")
+    local RAW_CONTENT=$(cat .memory)
+    
+    # 1. Prepare Text for Embedding (Needs to be plain text)
+    local FULL_TEXT="Project '$PROJ' Context: $RAW_CONTENT"
+    
+    echo "🏗️  Indexing Project Context: $PROJ..."
+    
+    # 2. Get Embedding (AI)
+    echo -n "🧠 Embedding..."
+    local VECTOR=$(_get_embedding "$FULL_TEXT")
+    
+    if [[ -z "$VECTOR" ]]; then echo "❌ Failed to generate embedding."; return 1; fi
+    
+    # 3. Prepare Content for SQL (Base64 Safe Transport)
+    # We encode the text to avoid SQL injection/syntax errors with quotes
+    local B64_CONTENT=$(echo -n "$FULL_TEXT" | base64 | tr -d '\n')
+    local SAFE_SOURCE="Dev: $PROJ"
+    
+    echo -n " 💾 Storing..."
+    
+    # We use Postgres 'convert_from(decode(..., 'base64'), 'UTF8')' to handle the insert
+    if ERROR=$(silo "INSERT INTO items (content, source, embedding) 
+                     VALUES (convert_from(decode('$B64_CONTENT', 'base64'), 'UTF8'), '$SAFE_SOURCE', '$VECTOR');" 2>&1); then
+        echo " ✅ Memorized."
+    else
+        echo " ❌ Database Error:"
+        echo "$ERROR"
+        return 1
+    fi
 }
 
 # ------------------------------------------
