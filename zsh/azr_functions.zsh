@@ -79,7 +79,7 @@ silo() {
                 psql -h localhost -p $LOCAL_PORT -U "$DB_USER" -d "$CURRENT_DB"
             else
                 # One-off
-                if [[ "$1" =~ "(DELETE|DROP|TRUNCATE)" ]]; then
+                if [[ "$1" =~ (DELETE|DROP|TRUNCATE) ]] && [ -z "$SILO_FORCE" ]; then
                     echo -n "⚠️  Dangerous command. Execute? [y/N] "
                     read -r confirm
                     [[ "$confirm" != "y" ]] && echo "❌ Aborted." && return 1

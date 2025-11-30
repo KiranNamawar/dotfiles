@@ -1120,6 +1120,301 @@ clip() {
     esac
 }
 
+
+# ==========================================
+# TEMPDB (Ephemeral Databases)
+# ==========================================
+# Usage:
+#   tempdb mysql [--ttl 4h] [--note "playground"]
+#   tempdb pg [--ttl 1d] [--note "testing"]
+#   tempdb ls
+#   tempdb drop <id|engine:name>
+#   tempdb clean
+tempdb() {
+    local sub=""
+
+    if [[ $# -gt 0 ]]; then
+        sub="$1"
+        shift
+    fi
+
+    # Requires jam (MySQL) & silo (Postgres)
+    if ! command -v jam >/dev/null 2>&1; then
+        echo "❌ jam (MySQL wrapper) not found." >&2
+        return 1
+    fi
+
+    # Helper: escape single quotes for SQL
+    _tempdb_esc() { echo "${1//\'/\'\'}"; }
+
+    # Ensure metadata table exists
+    jam -e "CREATE TABLE IF NOT EXISTS utils.tempdb (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        engine ENUM('mysql','pg') NOT NULL,
+        name VARCHAR(64) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NULL,
+        notes VARCHAR(255),
+        UNIQUE KEY uniq_engine_name (engine, name)
+    );" >/dev/null 2>&1
+
+    # Parse TTL like "4h" or "2d" into MySQL INTERVAL
+    _tempdb_interval_sql() {
+        local ttl="$1"
+        local unit="${ttl: -1}"
+        local amount="${ttl%$unit}"
+        [[ -z "$amount" || "$amount" == "$ttl" ]] && amount=4 unit="h"
+        case "$unit" in
+            h) echo "INTERVAL $amount HOUR" ;;
+            d) echo "INTERVAL $amount DAY" ;;
+            *) echo "INTERVAL 4 HOUR" ;;
+        esac
+    }
+
+    case "$sub" in
+        mysql)
+            local ttl="4h"
+            local note=""
+            local name=""
+
+            # Parse flags
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --ttl)  ttl="$2"; shift 2 ;;
+                    --note) note="$2"; shift 2 ;;
+                    --name) name="$2"; shift 2 ;;
+                    *)      shift ;;
+                esac
+            done
+
+            # Generate a DB name if not provided
+            if [ -z "$name" ]; then
+                name="tmp_${USER}_$(date +%s)"
+            fi
+            # Sanitize to valid identifier
+            name="${name//[^a-zA-Z0-9_]/_}"
+
+            local interval_sql=$(_tempdb_interval_sql "$ttl")
+
+            echo "🍅 Creating MySQL temp DB '$name'..."
+            if ! jam -e "CREATE DATABASE \`$name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"; then
+                echo "❌ Failed to create database." >&2
+                return 1
+            fi
+
+            jam -e "INSERT INTO utils.tempdb (engine, name, expires_at, notes)
+                    VALUES ('mysql', '$(_tempdb_esc "$name")',
+                            DATE_ADD(NOW(), $interval_sql),
+                            '$(_tempdb_esc "$note")');" >/dev/null 2>&1
+
+            # Show info
+            local info
+            info=$(jam -N -B -e "SELECT id, created_at, expires_at FROM utils.tempdb WHERE engine='mysql' AND name='$(_tempdb_esc "$name")';")
+            local id created expires
+            id=$(echo "$info" | awk -F'\t' 'NR==1{print $1}')
+            created=$(echo "$info" | awk -F'\t' 'NR==1{print $2}')
+            expires=$(echo "$info" | awk -F'\t' 'NR==1{print $3}')
+
+            echo "✅ MySQL temp DB created:"
+            echo "   id     : $id"
+            echo "   name   : $name"
+            echo "   created: $created"
+            echo "   expires: $expires"
+            echo ""
+            echo "   connect (jam):"
+            echo "     jam -e \"USE $name;\""
+            echo "   connect (mysql CLI):"
+            echo "     mysql -h 10.0.1.57 -u admin -p\$JAM_PASS $name"
+            ;;
+
+        pg)
+            if ! command -v silo >/dev/null 2>&1; then
+                echo "❌ silo (Postgres wrapper) not found." >&2
+                return 1
+            fi
+
+            local ttl="4h"
+            local note=""
+            local name=""
+
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --ttl)  ttl="$2"; shift 2 ;;
+                    --note) note="$2"; shift 2 ;;
+                    --name) name="$2"; shift 2 ;;
+                    *)      shift ;;
+                esac
+            done
+
+            if [ -z "$name" ]; then
+                name="tmp_${USER}_$(date +%s)"
+            fi
+            name="${name//[^a-zA-Z0-9_]/_}"
+
+            local interval_sql=$(_tempdb_interval_sql "$ttl")
+
+            echo "🍆 Creating Postgres temp DB '$name'..."
+            # We assume silo connects as a superuser to the 'postgres' DB when SILO_DB is unset
+            local OLD_SILO_DB="$SILO_DB"
+            unset SILO_DB
+            if ! silo "CREATE DATABASE \"$name\";" >/dev/null 2>&1; then
+                echo "❌ Failed to create Postgres database." >&2
+                export SILO_DB="$OLD_SILO_DB"
+                return 1
+            fi
+            export SILO_DB="$OLD_SILO_DB"
+
+            jam -e "INSERT INTO utils.tempdb (engine, name, expires_at, notes)
+                    VALUES ('pg', '$(_tempdb_esc "$name")',
+                            DATE_ADD(NOW(), $interval_sql),
+                            '$(_tempdb_esc "$note")');" >/dev/null 2>&1
+
+            local info
+            info=$(jam -N -B -e "SELECT id, created_at, expires_at FROM utils.tempdb WHERE engine='pg' AND name='$(_tempdb_esc "$name")';")
+            local id created expires
+            id=$(echo "$info" | awk -F'\t' 'NR==1{print $1}')
+            created=$(echo "$info" | awk -F'\t' 'NR==1{print $2}')
+            expires=$(echo "$info" | awk -F'\t' 'NR==1{print $3}')
+
+            echo "✅ Postgres temp DB created:"
+            echo "   id     : $id"
+            echo "   name   : $name"
+            echo "   created: $created"
+            echo "   expires: $expires"
+            echo ""
+            echo "   connect (silo, one-off):"
+            echo "     SILO_DB=$name silo"
+            ;;
+
+        ls)
+            local rows
+            rows=$(jam -N -B -e "SELECT id, engine, name, created_at, expires_at, IF(expires_at < NOW(), 'expired','active') AS status, notes FROM utils.tempdb ORDER BY created_at DESC;")
+            if [ -z "$rows" ]; then
+                echo "📭 No temp DBs tracked."
+                return 0
+            fi
+
+            if command -v fzf >/dev/null 2>&1; then
+                echo "$rows" | fzf \
+                    --height=60% \
+                    --layout=reverse \
+                    --border \
+                    --header="🧪 tempdb list (id | engine | name | created | expires | status | notes)" \
+                    --preview 'echo -e "id: {1}\nengine: {2}\nname: {3}\ncreated: {4}\nexpires: {5}\nstatus: {6}\nnotes: {7}"' \
+                    --preview-window='right:60%'
+            else
+                echo "$rows" | column -t -s $'\t'
+            fi
+            ;;
+
+        drop)
+            local target="$1"
+            if [ -z "$target" ]; then
+                echo "Usage: tempdb drop <id|engine:name>" >&2
+                return 1
+            fi
+
+            local engine name
+            local id=""
+
+            if [[ "$target" =~ ^[0-9]+$ ]]; then
+                id="$target"
+                # Resolve engine + name by id
+                read engine name <<<"$(jam -N -B -e "SELECT engine, name FROM utils.tempdb WHERE id=$id;" | awk -F'\t' 'NR==1{print $1, $2}')"
+                if [ -z "$engine" ]; then
+                    echo "❌ No tempdb with id=$id" >&2
+                    return 1
+                fi
+            else
+                # engine:name
+                engine="${target%%:*}"
+                name="${target#*:}"
+            fi
+
+            if [ -z "$engine" ] || [ -z "$name" ]; then
+                echo "❌ Could not resolve engine/name from '$target'." >&2
+                return 1
+            fi
+
+            echo "🗑️  Dropping $engine database '$name'..."
+
+            case "$engine" in
+                mysql)
+                    jam -e "DROP DATABASE IF EXISTS \`$name\`;" ;;
+                pg)
+                    if ! command -v silo >/dev/null 2>&1; then
+                        echo "❌ silo (Postgres wrapper) not found." >&2
+                        return 1
+                    fi
+
+                    echo "   (connecting via silo to drop Postgres DB)..."
+
+                    # Best-effort: kill existing connections (ignore errors)
+                    SILO_DB=postgres SILO_FORCE=1 silo \
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$name';" \
+                        >/dev/null 2>&1 || true
+
+                    # Now actually drop, non-interactively
+                    local err rc
+                    err=$(SILO_DB=postgres SILO_FORCE=1 silo \
+                        "DROP DATABASE IF EXISTS \"$name\";" \
+                        2>&1 >/dev/null)
+                    rc=$?
+
+                    if [ $rc -ne 0 ]; then
+                        echo "❌ Failed to drop Postgres database '$name'."
+                        if [ -n "$err" ]; then
+                            echo "   Error from silo / Postgres:"
+                            echo "   --------------------------------"
+                            echo "$err" | sed 's/^/   /'
+                            echo "   --------------------------------"
+                        fi
+                        return 1
+                    fi
+                    ;;
+                *)
+                    echo "❌ Unknown engine '$engine'." >&2
+                    return 1
+                    ;;
+            esac
+
+            # Remove metadata
+            if [ -n "$id" ]; then
+                jam -e "DELETE FROM utils.tempdb WHERE id=$id;" >/dev/null 2>&1
+            else
+                jam -e "DELETE FROM utils.tempdb WHERE engine='$engine' AND name='$(_tempdb_esc "$name")';" >/dev/null 2>&1
+            fi
+
+            echo "✅ Dropped."
+            ;;
+
+        clean)
+            echo "🧹 Cleaning expired temp DBs..."
+            local expired
+            expired=$(jam -N -B -e "SELECT id, engine, name FROM utils.tempdb WHERE expires_at IS NOT NULL AND expires_at < NOW();")
+            if [ -z "$expired" ]; then
+                echo "✅ Nothing to clean."
+                return 0
+            fi
+
+            echo "$expired" | while IFS=$'\t' read -r id engine name; do
+                [ -z "$id" ] && continue
+                echo " - $engine:$name (id=$id)"
+                tempdb drop "$id"
+            done
+            ;;
+
+        *)
+            echo "Usage:"
+            echo "  tempdb mysql [--ttl 4h] [--note 'playground'] [--name custom_name]"
+            echo "  tempdb pg    [--ttl 1d] [--note 'testing'] [--name custom_name]"
+            echo "  tempdb ls"
+            echo "  tempdb drop <id|engine:name>"
+            echo "  tempdb clean"
+            ;;
+    esac
+}
+
 # ==========================================
 #  OCI LAUNCHER (The Master Menu)
 # ==========================================
