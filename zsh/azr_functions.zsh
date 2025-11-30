@@ -427,20 +427,22 @@ say() {
     if [ -z "$TEXT" ] && [ ! -t 0 ]; then TEXT=$(cat); fi
     if [ -z "$TEXT" ]; then echo "Usage: say 'text'"; return 1; fi
 
-    # 1. CLEANUP (Pandoc > Sed)
+    # 1. CLEANUP: Strip ANSI Colors first, then Markdown
     local CLEAN_TEXT=""
+    
+    # Strip ANSI colors (The \e[...] stuff)
+    local NO_COLOR=$(echo "$TEXT" | perl -pe 's/\e\[?.*?[\@-~]//g')
+
     if command -v pandoc &>/dev/null; then
-        CLEAN_TEXT=$(echo "$TEXT" | pandoc -f markdown -t plain --wrap=none)
+        # Use Pandoc to strip Markdown (*bold*, links) into plain text
+        CLEAN_TEXT=$(echo "$NO_COLOR" | pandoc -f markdown -t plain --wrap=none)
     else
-        CLEAN_TEXT=$(echo "$TEXT" | sed -E -e 's/\*\*//g' -e 's/^#+ //g' -e 's/\[([^]]*)\]\([^)]*\)/\1/g' -e 's/`//g')
+        # Fallback cleanup
+        CLEAN_TEXT=$(echo "$NO_COLOR" | sed -E -e 's/\*\*//g' -e 's/^#+ //g' -e 's/\[([^]]*)\]\([^)]*\)/\1/g' -e 's/`//g')
     fi
 
-    # 2. STREAMING AUDIO (The Hack)
-    # The ( ... ) &! syntax tells Zsh: "Do this in the background and forget about it"
+    # 2. STREAMING AUDIO
     if command -v mpv &>/dev/null; then
-        # -s: Silent mode
-        # -f: Fail silently on HTTP error (prevents playing error text as audio)
-        # mpv - : Plays from Standard Input
         (
             curl -s -f -X POST "https://${SAY_REGION}.tts.speech.microsoft.com/cognitiveservices/v1" \
                 -H "Ocp-Apim-Subscription-Key: $SAY_KEY" \
@@ -448,28 +450,9 @@ say() {
                 -H "X-Microsoft-OutputFormat: audio-16khz-128kbitrate-mono-mp3" \
                 -d "<speak version='1.0' xml:lang='en-US'><voice xml:lang='en-US' xml:gender='Female' name='en-US-AvaMultilingualNeural'>$CLEAN_TEXT</voice></speak>" \
                 | mpv --no-terminal --cache=yes - &>/dev/null
-        ) &!
-        # Error Check: If curl failed, the pipe was empty.
-        if [ $? -ne 0 ]; then
-            echo "❌ Voice Stream Failed. Check your API Key or Quota." >&2
-        fi
-
+        ) &|
     else
-        # Fallback for systems without MPV (Use standard download method)
-        (
-            local AUDIO_FILE="/tmp/say_$(date +%s).mp3"
-            curl -s -X POST "https://${SAY_REGION}.tts.speech.microsoft.com/cognitiveservices/v1" \
-                -H "Ocp-Apim-Subscription-Key: $SAY_KEY" \
-                -H "Content-Type: application/ssml+xml" \
-                -H "X-Microsoft-OutputFormat: audio-16khz-128kbitrate-mono-mp3" \
-                -d "<speak version='1.0' xml:lang='en-US'><voice xml:lang='en-US' xml:gender='Female' name='en-US-AvaMultilingualNeural'>$CLEAN_TEXT</voice></speak>" \
-                --output "$AUDIO_FILE"
-
-            if command -v paplay &>/dev/null; then
-                paplay "$AUDIO_FILE"
-            fi
-            rm -f "$AUDIO_FILE"
-        ) &!
+        echo "❌ Error: 'mpv' not installed. Cannot stream audio."
     fi
 }
 
@@ -482,11 +465,10 @@ say() {
 #   3. CHAT:    hey "Who are you?"        (Asks AI, speaks result)
 #   4. ECHO:    echo "Done" | hey         (Just speaks the input)
 hey() {
-    # 0. INTERCEPT "STOP" / "SHUTUP"
+    # 0. INTERCEPT "STOP"
     if [[ "$1" == "stop" || "$1" == "shutup" || "$1" == "quiet" ]]; then
         echo "🤫 Silencing..."
         pkill mpv 2>/dev/null
-        pkill paplay 2>/dev/null
         return
     fi
 
@@ -495,16 +477,25 @@ hey() {
     # --- Input Handling Logic ---
     if [ -n "$1" ]; then
         if command -v "$1" &>/dev/null; then
+            # Case A: Run a command (e.g., 'hey date')
             echo "🤔 Running '$1'..."
             OUTPUT=$("$@")
         else
-            echo "🤔 Asking AI..."
-            OUTPUT=$(ask "$*")
+            # Case B: Ask AI (The Upgrade)
+            # Try 'rask' (Memory) first, fallback to 'ask' (Generic)
+            if command -v rask &>/dev/null; then
+                # echo "🤔 Rasking..."
+                OUTPUT=$(rask "$*")
+            else
+                echo "🤔 Asking..."
+                OUTPUT=$(ask "$*")
+            fi
         fi
     elif [ ! -t 0 ]; then
+        # Case C: Piped input (e.g., cat file | hey)
         OUTPUT=$(cat)
     else
-        echo "Usage: hey <command> [args] OR pipe | hey [command]"
+        echo "Usage: hey <command/question>"
         return 1
     fi
 
@@ -514,17 +505,19 @@ hey() {
         return 1
     fi
 
-    # 3. VISUAL OUTPUT
-    if command -v glow &>/dev/null; then
-        echo "$OUTPUT" | glow -
+    # 3. VISUAL OUTPUT (Pretty Print)
+    # Rask handles its own coloring, but we pipe through glow if it's raw text
+    if command -v glow &>/dev/null && [ -t 1 ]; then
+        # Simple check: does it look like markdown?
+        echo "$OUTPUT" | glow - 2>/dev/null || echo "$OUTPUT"
     else
         echo "$OUTPUT"
     fi
 
-    # 4. AUDIO OUTPUT (Streaming Voice)
+    # 4. AUDIO OUTPUT (Clean Voice)
+    # The new 'say' function strips the colors automatically
     echo "$OUTPUT" | say
 }
-
 
 # ------------------------------------------
 # SKY LAUNCHER

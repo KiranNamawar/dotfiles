@@ -129,7 +129,7 @@ _get_embedding() {
     
     # 1. Construct JSON
     # Truncate text to ~2000 chars to stay safe within limits
-    local clean_text=$(echo "$text" | tr -d '\n"' | head -c 2000)
+    local clean_text=$(echo "$text" | tr -d '\n"' | head -c 8000)
     
     local payload=$(jq -n \
         --arg t "$clean_text" \
@@ -681,7 +681,7 @@ rask() {
     local Q_VEC=$(_get_embedding "$QUERY")
     
     # Fetch Top 3 matches from Azure
-    local CONTEXT=$(silo "SELECT content FROM items ORDER BY embedding <=> '$Q_VEC' LIMIT 3;" | grep -v "rows)" | grep -v "^--" | tr '\n' ' ')
+    local CONTEXT=$(SILO_DB=memory silo "SELECT content FROM items ORDER BY embedding <=> '$Q_VEC' LIMIT 3;" | grep -v "rows)" | grep -v "^--" | tr '\n' ' ')
     
     if [ -z "$CONTEXT" ]; then
         echo " (No memory found)" >&2

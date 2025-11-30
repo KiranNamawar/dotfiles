@@ -461,7 +461,7 @@ notes() {
                 echo "   Reading: $filename"
                 
                 # Content: First 1000 chars (Embeddings have limits)
-                local content=$(head -c 1000 "$file")
+                local content=$(head -c 5000 "$file")
                 
                 # Send to Recall (Silence output to keep it clean)
                 # We use the filename as the 'Source'
