@@ -1415,6 +1415,77 @@ tempdb() {
     esac
 }
 
+# ------------------------------------------
+# 13. POST (Email Sender)
+# ------------------------------------------
+# Purpose: Send transactional emails via OCI SMTP.
+# Usage:   post "subject" "body" "to@email.com"
+#          echo "body" | post "subject" "to@email.com"
+post() {
+    local SUBJECT="$1"
+    local BODY="$2"
+    local TO="$3"
+
+    # Handle Piped Input
+    if [ ! -t 0 ]; then
+        TO="$2"
+        BODY=$(cat)
+    fi
+
+    if [ -z "$TO" ]; then 
+        echo "Usage: post <subject> <body> <to_email>"
+        echo "       echo <body> | post <subject> <to_email>"
+        return 1
+    fi
+
+    # 1. Load Secrets
+    local HOST=$(_get_key "OCI_SMTP_HOST")
+    local USER=$(_get_key "OCI_SMTP_USER")
+    local PASS=$(_get_key "OCI_SMTP_PASS")
+    local FROM=$(_get_key "OCI_SMTP_FROM")
+
+    if [[ -z "$HOST" || -z "$USER" || -z "$PASS" ]]; then
+        echo "❌ Error: SMTP credentials missing in Vault."
+        return 1
+    fi
+
+    echo "📧 Sending to $TO..."
+
+    # 2. Python SMTP Script
+    # We pass variables via Environment to avoid quoting hell
+    export SMTP_HOST="$HOST"
+    export SMTP_USER="$USER"
+    export SMTP_PASS="$PASS"
+    export SMTP_FROM="$FROM"
+    export SMTP_TO="$TO"
+    export SMTP_SUB="$SUBJECT"
+    export SMTP_BODY="$BODY"
+
+    python3 -c "
+import smtplib, ssl, os, sys
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+try:
+    msg = MIMEMultipart()
+    msg['From'] = os.environ['SMTP_FROM']
+    msg['To'] = os.environ['SMTP_TO']
+    msg['Subject'] = os.environ['SMTP_SUB']
+    msg.attach(MIMEText(os.environ['SMTP_BODY'], 'plain'))
+
+    # Connect to OCI SMTP (Port 587 for STARTTLS)
+    server = smtplib.SMTP(os.environ['SMTP_HOST'], 587)
+    server.starttls()
+    server.login(os.environ['SMTP_USER'], os.environ['SMTP_PASS'])
+    server.sendmail(os.environ['SMTP_FROM'], os.environ['SMTP_TO'], msg.as_string())
+    server.quit()
+    print('✅ Sent.')
+except Exception as e:
+    print(f'❌ Failed: {e}')
+    sys.exit(1)
+"
+}
+
 # ==========================================
 #  OCI LAUNCHER (The Master Menu)
 # ==========================================
