@@ -457,74 +457,74 @@ say() {
 }
 
 # ------------------------------------------
-# JARVIS MODE (Universal Voice Wrapper)
+# jarvis mode (universal voice wrapper)
 # ------------------------------------------
-# Usage:
-#   1. COMMAND: hey research "Azure"      (Runs cmd, shows output, speaks it)
-#   2. PIPE:    cat error.log | hey why   (Passes input to cmd, speaks result)
-#   3. CHAT:    hey "Who are you?"        (Asks AI, speaks result)
-#   4. ECHO:    echo "Done" | hey         (Just speaks the input)
+# usage:
+#   1. command: hey research "azure"      (runs cmd, shows output, speaks it)
+#   2. pipe:    cat error.log | hey why   (passes input to cmd, speaks result)
+#   3. chat:    hey "who are you?"        (asks ai, speaks result)
+#   4. echo:    echo "done" | hey         (just speaks the input)
 hey() {
-    # 0. INTERCEPT "STOP"
+    # 0. intercept "stop"
     if [[ "$1" == "stop" || "$1" == "shutup" || "$1" == "quiet" ]]; then
-        echo "🤫 Silencing..."
+        echo "🤫 silencing..."
         pkill mpv 2>/dev/null
         return
     fi
 
-    local OUTPUT=""
+    local output=""
 
-    # --- Input Handling Logic ---
+    # --- input handling logic ---
     if [ -n "$1" ]; then
         if command -v "$1" &>/dev/null; then
-            # Case A: Run a command (e.g., 'hey date')
-            echo "🤔 Running '$1'..."
-            OUTPUT=$("$@")
+            # case a: run a command (e.g., 'hey date')
+            echo "🤔 running '$1'..."
+            output=$("$@")
         else
-            # Case B: Ask AI (The Upgrade)
-            # Try 'rask' (Memory) first, fallback to 'ask' (Generic)
+            # case b: ask ai (the upgrade)
+            # try 'rask' (memory) first, fallback to 'ask' (generic)
             if command -v rask &>/dev/null; then
-                # echo "🤔 Rasking..."
-                OUTPUT=$(rask "$*")
+                # echo "🤔 rasking..."
+                output=$(rask "$*")
             else
-                echo "🤔 Asking..."
-                OUTPUT=$(ask "$*")
+                echo "🤔 asking..."
+                output=$(ask "$*")
             fi
         fi
     elif [ ! -t 0 ]; then
-        # Case C: Piped input (e.g., cat file | hey)
-        OUTPUT=$(cat)
+        # case c: piped input (e.g., cat file | hey)
+        output=$(cat)
     else
-        echo "Usage: hey <command/question>"
+        echo "usage: hey <command/question>"
         return 1
     fi
 
-    # 2. VALIDATION
-    if [ -z "$OUTPUT" ]; then
-        echo "❌ No output returned." >&2
+    # 2. validation
+    if [ -z "$output" ]; then
+        echo "❌ no output returned." >&2
         return 1
     fi
 
-    # 3. VISUAL OUTPUT (Pretty Print)
-    # Rask handles its own coloring, but we pipe through glow if it's raw text
+    # 3. visual output (pretty print)
+    # rask handles its own coloring, but we pipe through glow if it's raw text
     if command -v glow &>/dev/null && [ -t 1 ]; then
-        # Simple check: does it look like markdown?
-        echo "$OUTPUT" | glow - 2>/dev/null || echo "$OUTPUT"
+        # simple check: does it look like markdown?
+        echo "$output" | glow - 2>/dev/null || echo "$output"
     else
-        echo "$OUTPUT"
+        echo "$output"
     fi
 
-    # 4. AUDIO OUTPUT (Clean Voice)
-    # The new 'say' function strips the colors automatically
-    echo "$OUTPUT" | say
+    # 4. audio output (clean voice)
+    # the new 'say' function strips the colors automatically
+    echo "$output" | say
 }
 
 # ------------------------------------------
-# SKY LAUNCHER
+# sky launcher
 # ------------------------------------------
 sky() {
-    local AZR_LIB="${(%):-%x}"
-    if [ -z "$AZR_LIB" ]; then AZR_LIB="${BASH_SOURCE[0]}"; fi
+    local azr_lib="${(%):-%x}"
+    if [ -z "$azr_lib" ]; then azr_lib="${bash_source[0]}"; fi
 
     local tools=(
         "silo:General DB (PostgreSQL)"

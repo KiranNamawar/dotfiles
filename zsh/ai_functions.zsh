@@ -243,53 +243,53 @@ summarize() {
     _render_output "$result"
 }
 
-# 7. GCMT (Git Commit)
-# Purpose: Writes semantic commit messages based on diffs.
-# Model: Gemini 2.5 Flash (Massive Context for large diffs)
-# Usage: gcmt (inside git repo)
-gcmt() {
-    if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then echo "❌ Not a git repo."; return 1; fi
-    if git diff --cached --quiet; then echo "⚠️  No staged changes."; return 1; fi
-
-    local branch=$(git branch --show-current)
-    local repo_root=$(git rev-parse --show-toplevel)
-    local repo_name=$(basename "$repo_root")
-    local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 100000)
-    local sys="You are a Semantic Git Commit Writer. 
-    Rules:
-    1. First Line: <type>(<scope>): <subject> (Max 50 chars, Imperative mood).
-    2. Body: Optional. Only add if changes are complex.
-    3. Body Limit: Max 3 bullet points. Be extremely concise.
-    4. Output: ONLY the raw commit message string."
-
-    local user_prompt="Current Branch: $branch\n\nCode Changes:\n$diff_content"
-    
-    local msg=$(_call_gemini "$sys" "$user_prompt")
-    msg=$(echo "$msg" | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
-    
-    if [ -z "$msg" ]; then return 1; fi
-    
-    printf "\r\033[K" >&2 
-    echo -e "\033[1;32m$msg\033[0m"
-    echo -n "🚀 Commit? [y/n/e]: "
-    read -r choice
-    case "$choice" in
-        y|Y) 
-          if git commit -m "$msg"; then
-                # --- INTEGRATION: Recall ---
-                if command -v recall &>/dev/null; then
-                    # Content: [Project] Message (Branch)
-                    # Source: Git: Project
-                    local memory="[$repo_name] $msg (Branch: $branch)"
-                    ( recall add "$memory" "Git: $repo_name" >/dev/null 2>&1 ) &|
-                    echo "🧠 Commit memorized."
-                fi
-            fi
-            ;;
-        e|E) git commit -m "$msg" -e ;;
-        *) echo "❌ Aborted." ;;
-    esac
-}
+# # 7. GCMT (Git Commit)
+# # Purpose: Writes semantic commit messages based on diffs.
+# # Model: Gemini 2.5 Flash (Massive Context for large diffs)
+# # Usage: gcmt (inside git repo)
+# gcmt() {
+#     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then echo "❌ Not a git repo."; return 1; fi
+#     if git diff --cached --quiet; then echo "⚠️  No staged changes."; return 1; fi
+#
+#     local branch=$(git branch --show-current)
+#     local repo_root=$(git rev-parse --show-toplevel)
+#     local repo_name=$(basename "$repo_root")
+#     local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 100000)
+#     local sys="You are a Semantic Git Commit Writer. 
+#     Rules:
+#     1. First Line: <type>(<scope>): <subject> (Max 50 chars, Imperative mood).
+#     2. Body: Optional. Only add if changes are complex.
+#     3. Body Limit: Max 3 bullet points. Be extremely concise.
+#     4. Output: ONLY the raw commit message string."
+#
+#     local user_prompt="Current Branch: $branch\n\nCode Changes:\n$diff_content"
+#
+#     local msg=$(_call_gemini "$sys" "$user_prompt")
+#     msg=$(echo "$msg" | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
+#
+#     if [ -z "$msg" ]; then return 1; fi
+#
+#     printf "\r\033[K" >&2 
+#     echo -e "\033[1;32m$msg\033[0m"
+#     echo -n "🚀 Commit? [y/n/e]: "
+#     read -r choice
+#     case "$choice" in
+#         y|Y) 
+#           if git commit -m "$msg"; then
+#                 # --- INTEGRATION: Recall ---
+#                 if command -v recall &>/dev/null; then
+#                     # Content: [Project] Message (Branch)
+#                     # Source: Git: Project
+#                     local memory="[$repo_name] $msg (Branch: $branch)"
+#                     ( recall add "$memory" "Git: $repo_name" >/dev/null 2>&1 ) &|
+#                     echo "🧠 Commit memorized."
+#                 fi
+#             fi
+#             ;;
+#         e|E) git commit -m "$msg" -e ;;
+#         *) echo "❌ Aborted." ;;
+#     esac
+# }
 
 # 8. GURU
 # Purpose: Context-aware project architect. Knows your file structure.
@@ -300,35 +300,55 @@ guru() {
     local context_files=""
     local user_prompt=""
     local context_tree=""
-    
+
+    # 1. Build structure overview
     if command -v lsd &> /dev/null; then
-        context_tree=$(lsd --tree --depth 2 --group-directories-first --ignore-glob .git --ignore-glob node_modules --color=never)
+        context_tree=$(lsd --tree --depth 2 --group-directories-first \
+            --ignore-glob .git --ignore-glob node_modules --color=never)
     else
         context_tree=$(find . -maxdepth 2 -not -path '*/.*')
     fi
 
+    # 2. Parse args
+    local args=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -f|--file)
                 if [ -f "$2" ]; then
-                    context_files+="\n--- FILE: $2 ---\n$(command cat "$2")\n"
+                    # Truncate each file to ~8000 chars to stay safe
+                    local contents
+                    contents=$(command cat "$2" | head -c 8000)
+                    context_files+="\n--- FILE: $2 ---\n$contents\n"
                     shift 2
                 else
                     echo "⚠️  File not found: $2"
-                    shift
+                    shift 2
                 fi
                 ;;
-            *) user_prompt="$1"; shift ;;
+            *)
+                args+=("$1")
+                shift
+                ;;
         esac
     done
-    if [ -z "$user_prompt" ]; then echo "Usage: guru [-f file] 'Question'"; return 1; fi
+
+    user_prompt="${args[*]}"
+
+    if [ -z "$user_prompt" ]; then
+        echo "Usage: guru [-f file] 'Question...'"
+        return 1
+    fi
 
     local sys="You are the Lead Architect.
-    [[ STRUCTURE ]]
-    $context_tree
-    [[ FILES ]]
-    $context_files
-    Task: Answer based on context. Use Google Search if needed."
+
+[[ STRUCTURE ]]
+$context_tree
+
+[[ FILES ]]
+$context_files
+
+Task: Answer based primarily on the STRUCTURE and FILES above.
+If something is unclear, you MAY use Google Search as a secondary source."
 
     local result=$(_call_gemini "$sys" "$user_prompt" '[{ "google_search": {} }]')
     _render_output "$result"

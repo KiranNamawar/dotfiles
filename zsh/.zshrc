@@ -61,7 +61,12 @@ if [ -f ~/.dotfiles/zsh/ai_functions.zsh ]; then
     source ~/.dotfiles/zsh/ai_functions.zsh
 fi
 
-# 3. Local Utilities (util/sys)
+# 3. Git Intelligence Layer
+if [ -f ~/.dotfiles/zsh/git_functions.zsh ]; then
+    source ~/.dotfiles/zsh/git_functions.zsh
+fi
+
+# 4. Local Utilities (util/sys)
 # This file contains 'util', 'jqe', 'proj', etc.
 if [ -f ~/.dotfiles/zsh/functions.zsh ]; then
     source ~/.dotfiles/zsh/functions.zsh
@@ -92,6 +97,9 @@ alias ll='lsd -l --group-directories-first'
 alias la='lsd -la --group-directories-first'
 alias tree='lsd --tree'
 alias sqlite='litecli'
+
+# Old glog alias renamed
+alias gll='git log --oneline --decorate --graph'
 
 # fnm (Node Manager)
 FNM_PATH="/home/kiran/.local/share/fnm"
