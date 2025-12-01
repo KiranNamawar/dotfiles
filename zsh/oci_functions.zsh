@@ -31,13 +31,11 @@ _copy_to_clip() {
 }
 
 # ------------------------------------------
-# 1. BASKET (Private Storage)
+# NAME: basket
+# DESC: Private Storage - Manage OCI Object Storage
+# USAGE: basket [ls|push|pull|rm|link]
+# TAGS: storage, s3, oci, bucket
 # ------------------------------------------
-# Purpose: Manages personal files in private OCI Object Storage.
-# Usage:   basket ls
-#          basket push <file>
-#          basket pull <file> (Interactive)
-#          basket link <file> (Generates 24h PAR link)
 basket() {
     local CMD=$1
     local REMOTE="oracle:basket"
@@ -123,12 +121,11 @@ basket() {
 }
 
 # ------------------------------------------
-# 2. SITE (Static Deployer)
+# NAME: site
+# DESC: Static Deployer - Deploy to public OCI bucket
+# USAGE: site [deploy|ls|rm]
+# TAGS: deploy, static, web, s3
 # ------------------------------------------
-# Purpose: Deploys local 'dist' folders to public OCI bucket.
-# Usage:   site deploy ./dist my-project
-#          site ls
-#          site rm my-project
 site() {
     local CMD=$1
     local REMOTE="oracle:website"
@@ -191,10 +188,11 @@ site() {
 }
 
 # ------------------------------------------
-# 3. DROP (Public Share)
+# NAME: drop
+# DESC: Public Share - Upload file to public bucket
+# USAGE: drop <file>
+# TAGS: share, upload, public, s3
 # ------------------------------------------
-# Purpose: Uploads file to public bucket and returns URL.
-# Usage:   drop <file>
 drop() {
     local ARG1=$1
     local REMOTE="oracle:dropzone"
@@ -273,12 +271,11 @@ drop() {
 }
 
 # ------------------------------------------
-# 4. BUCKETS (Infra Manager)
+# NAME: buckets
+# DESC: Infra Manager - Manage OCI buckets
+# USAGE: buckets [ls|mk|rm|sync|nuke]
+# TAGS: bucket, oci, infra, manage
 # ------------------------------------------
-# Purpose: Generic CRUD for all OCI buckets.
-# Usage:   buckets mk <name>
-#          buckets ls [name]
-#          buckets sync <src> <dest>
 buckets() {
   local CMD=$1
   local REMOTE="oracle"
@@ -391,9 +388,12 @@ buckets() {
   esac
 }
 
-# ==========================================
-#  OBSIDIAN MANAGER
-# ==========================================
+# ------------------------------------------
+# NAME: notes
+# DESC: Obsidian Manager - Sync notes to OCI
+# USAGE: notes [up|down|status|open|index]
+# TAGS: notes, obsidian, sync, backup
+# ------------------------------------------
 notes() {
     local NOTES_PATH="$HOME/Documents/notes"
     local CMD=$1
@@ -463,12 +463,14 @@ notes() {
                 # Content: First 1000 chars (Embeddings have limits)
                 local content=$(head -c 5000 "$file")
                 
-                # Send to Recall (Silence output to keep it clean)
-                # We use the filename as the 'Source'
-                if recall add "Note: $filename. Content: $content" "Obsidian" >/dev/null 2>&1; then
-                    echo "   ✅ Indexed: $filename"
-                else
-                    echo "   ❌ Failed: $filename"
+                # Send to Memory (Silence output to keep it clean)
+                # --- Inject into Memory ---
+                if command -v memory &>/dev/null; then
+                    if memory add "Note: $filename. Content: $content" "Obsidian" >/dev/null 2>&1; then
+                        echo "   🧠 Memorized: $filename"
+                    else
+                        echo "   ❌ Failed: $filename"
+                    fi
                 fi
             done
             ;;
@@ -477,10 +479,11 @@ notes() {
 }
 
 # ------------------------------------------
-# 5. JAM (MySQL HeatWave)
+# NAME: jam
+# DESC: MySQL HeatWave - Connect to internal DB
+# USAGE: jam <database> [sql]
+# TAGS: mysql, db, heatwave, oci
 # ------------------------------------------
-# Purpose: Connects to internal MySQL instance via Tailscale.
-# Usage:   jam <database> [sql_command]
 jam() {
   [ -z "$JAM_PASS" ] && echo "⚠️ Env var JAM_PASS missing" && return 1
   local DB="$1"; [ -n "$DB" ] && shift
@@ -488,11 +491,11 @@ jam() {
 }
 
 # ------------------------------------------
-# 6. PANTRY (Autonomous DB)
+# NAME: pantry
+# DESC: Autonomous DB - Connect to Oracle ATP
+# USAGE: pantry [sql]
+# TAGS: oracle, sql, atp, db
 # ------------------------------------------
-# Purpose: Connects to Oracle ATP via SQLcl or Mongosh.
-# Usage:   pantry       (Interactive SQL)
-#          pantry "sql" (One-off)
 pantry() {
   [ -z "$TNS_ADMIN" ] && export TNS_ADMIN="$HOME/.oci/wallet"
   [ -z "$PANTRY_PASSWORD" ] && source ~/.oci/.secrets
@@ -509,9 +512,11 @@ else
 }
 
 # ------------------------------------------
-# 7. PANTRY-SH (Direct MongoDB Connection)
+# NAME: pantrysh
+# DESC: MongoDB Shell - Connect to Oracle Mongo API
+# USAGE: pantrysh [args]
+# TAGS: mongo, db, nosql, oci
 # ------------------------------------------
-# Dependency for 'stock' function
 pantrysh() {
         if [ -z "$PANTRY_PASSWORD" ] || [ -z "$PANTRY_HOST" ]; then
             [ -f ~/.oci/.secrets.sh ] && source ~/.oci/.secrets.sh
@@ -530,12 +535,11 @@ pantrysh() {
     }
 
 # ------------------------------------------
-# 8. KV (Key-Value Store)
+# NAME: kv
+# DESC: Key-Value Store - Persistent string storage in MySQL
+# USAGE: kv [set|get|rm|ls]
+# TAGS: kv, store, mysql, key-value
 # ------------------------------------------
-# Purpose: Persistent string storage in MySQL.
-# Usage:   kv set <key> <val>
-#          kv get <key>
-#          kv ls  (FZF Menu)
 kv() {
     local CMD=$1
     local KEY=$2
@@ -591,12 +595,11 @@ kv() {
 }
 
 # ------------------------------------------
-# 9. STOCK (JSON Store)
+# NAME: stock
+# DESC: JSON Store - NoSQL Document storage via Mongo API
+# USAGE: stock [set|get|ls|rm]
+# TAGS: json, store, mongo, nosql
 # ------------------------------------------
-# Purpose: NoSQL Document storage via Oracle MongoDB API.
-# Usage:   stock set <key> <json|@file>
-#          stock get <key>
-#          stock ls
 stock() {
   local CMD=$1
   local FULL_KEY=$2
@@ -751,12 +754,11 @@ stock() {
 }
 
 # ------------------------------------------
-# 10 . TASK (Todo List)
+# NAME: task
+# DESC: Task Manager - Simple todo list in MySQL
+# USAGE: task [add|ls|done|clean]
+# TAGS: task, todo, mysql, list
 # ------------------------------------------
-# Purpose: Simple CLI task manager backed by MySQL.
-# Usage:   task add "Buy Milk"
-#          task ls
-#          task done <id>
 task() {
     local CMD=$1; local ARG="${@:2}"
     case "$CMD" in
@@ -791,12 +793,11 @@ task() {
 }
 
 # ------------------------------------------
-# 11. VAULT (Secret Manager)
+# NAME: vault
+# DESC: Secret Manager - Manage API keys and secrets
+# USAGE: vault [add|load|env|ls|peek|rm|prune]
+# TAGS: secret, key, password, vault
 # ------------------------------------------
-# Purpose: Manages API keys and Env vars in MySQL.
-# Usage:   vault add <KEY> <VAL>
-#          vault load <KEY>
-#          vault env <CATEGORY>
 vault() {
     local CMD=$1
     local KEY=$2
@@ -880,15 +881,11 @@ vault() {
 }
 
 # ------------------------------------------
-# 12. MARK (AI Smart Bookmarks) - v1.1 (Zsh Fix)
+# NAME: mark
+# DESC: Smart Bookmarks - Save URLs with AI summary
+# USAGE: mark [add|ls|rm|init]
+# TAGS: bookmark, url, ai, summary
 # ------------------------------------------
-# Purpose: Saves URLs to MySQL (Jam) and uses AI to generate summaries/tags.
-#
-# Usage:   mark add <url>   (Fetch, Analyze, Save)
-#          mark ls          (Interactive Search & Open)
-#          mark rm <id>     (Delete bookmark)
-#
-# Dependencies: jam (MySQL), curl, _call_groq (AI Layer)
 mark() {
     local CMD=$1
     local ARG=$2
@@ -948,10 +945,10 @@ mark() {
             fi
 
             # --- Inject into Vector Memory ---
-            if command -v recall &>/dev/null; then
+            if command -v memory &>/dev/null; then
                 echo "🧠 Memorizing..."
                 # We execute directly. If it fails, we see the error.
-                recall add "Bookmark: $TITLE. $SUMMARY $TAGS" "$ARG"
+                memory add "Bookmark: $TITLE. $SUMMARY $TAGS" "$ARG"
             fi
 
             # Clean input for SQL (Remove tabs/newlines from input before saving)
@@ -1016,13 +1013,12 @@ mark() {
     esac
 }
 
-# ==========================================
-# 13. CLIP (Cloud Clipboard)
-# ==========================================
-# Usage: echo "foo" | clip       (Copy)
-#        clip copy "foo"         (Copy arg)
-#        clip paste              (Paste latest)
-#        clip ls                 (History)
+# ------------------------------------------
+# NAME: clip
+# DESC: Cloud Clipboard - Sync clipboard across devices
+# USAGE: clip [copy|paste|ls|mem|clean]
+# TAGS: clipboard, sync, cloud, copy
+# ------------------------------------------
 clip() {
     local CMD=$1
     local CONTENT=""
@@ -1100,7 +1096,7 @@ clip() {
             if [ -z "$CONTENT" ]; then echo "Usage: echo text | clip mem"; return 1; fi
             
             echo "🧠 Sending to Long-Term Memory..."
-            recall add "$CONTENT" "Clipboard"
+            memory add "$CONTENT" "Clipboard"
             ;;
 
         # CLEAR
@@ -1120,16 +1116,12 @@ clip() {
     esac
 }
 
-
-# ==========================================
-# TEMPDB (Ephemeral Databases)
-# ==========================================
-# Usage:
-#   tempdb mysql [--ttl 4h] [--note "playground"]
-#   tempdb pg [--ttl 1d] [--note "testing"]
-#   tempdb ls
-#   tempdb drop <id|engine:name>
-#   tempdb clean
+# ------------------------------------------
+# NAME: tempdb
+# DESC: Ephemeral DBs - Create temporary MySQL/PG databases
+# USAGE: tempdb [mysql|pg|ls|drop|clean]
+# TAGS: db, temp, mysql, postgres
+# ------------------------------------------
 tempdb() {
     local sub=""
 
@@ -1416,11 +1408,11 @@ tempdb() {
 }
 
 # ------------------------------------------
-# 13. POST (Email Sender)
+# NAME: post
+# DESC: Email Sender - Send transactional emails via OCI
+# USAGE: post "subject" "body" "to@email.com"
+# TAGS: email, send, smtp, oci
 # ------------------------------------------
-# Purpose: Send transactional emails via OCI SMTP.
-# Usage:   post "subject" "body" "to@email.com"
-#          echo "body" | post "subject" "to@email.com"
 post() {
     local SUBJECT="$1"
     local BODY="$2"
@@ -1486,12 +1478,12 @@ except Exception as e:
 "
 }
 
-# ==========================================
-# 14. DAILY (Habit & Routine Tracker)
-# ==========================================
-# Purpose: Track recurring habits with flexible schedules.
-# Usage:   daily add "Name" "Category" [mon/tue/daily]
-#          daily ls (Shows only today's tasks)
+# ------------------------------------------
+# NAME: daily
+# DESC: Habit Tracker - Track daily routines
+# USAGE: daily [add|ls|check|note|rm]
+# TAGS: habit, track, daily, routine
+# ------------------------------------------
 daily() {
     local CMD=$1
     local ARG2=$2
@@ -1613,44 +1605,33 @@ daily() {
     esac
 }
 
-# ==========================================
-#  OCI LAUNCHER (The Master Menu)
-# ==========================================
-# Usage: oi
+# ------------------------------------------
+# NAME: oi
+# DESC: OCI Launcher - Master menu for OCI tools
+# USAGE: oi
+# TAGS: launcher, menu, oci, tools
+# ------------------------------------------
 oi() {
     # 1. DYNAMICALLY LOCATE THIS FILE
-    # This ensures the preview works regardless of where you save this script.
-    # ${(%):-%x} is a ZSH specific flag to get the path of the current source script.
     local OCI_LIB="${(%):-%x}"
-
-    # Fallback for Bash if you ever switch (BASH_SOURCE)
     if [ -z "$OCI_LIB" ]; then OCI_LIB="${BASH_SOURCE[0]}"; fi
 
-    # 2. Define the menu
-    local tools=(
-        "basket:Private Storage (S3)"
-        "site:Static Deployer (Public S3)"
-        "drop:Public File Share"
-        "buckets:Infrastructure Manager"
-        "jam:MySQL HeatWave Interface"
-        "pantry:Autonomous DB (SQL)"
-        "kv:Key-Value Store (MySQL)"
-        "stock:JSON Document Store"
-        "task:Task Manager (MySQL)"
-        "vault:Secret Manager (MySQL)"
-    )
+    # 2. Build Dynamic Menu
+    local tools=()
+    while IFS= read -r line; do tools+=("$line"); done < <(_tmt_scan "$OCI_LIB")
 
     # 3. Run FZF with 'awk' Paragraph Preview
-    # This matches your AI Launcher logic: it reads THIS file ($OCI_LIB),
-    # looks for the paragraph containing "func_name()", and prints it.
-
     local selected=$(printf "%s\n" "${tools[@]}" | column -t -s ":" | fzf \
             --height=60% \
             --layout=reverse \
             --border \
+            --exact \
+            --tiebreak=begin \
             --header="🍅 Tamatar Cloud Controller" \
             --prompt="Select Tool > " \
-            --preview="awk -v func_name={1} 'BEGIN{RS=\"\"} \$0 ~ (\"(^|\\n)\" func_name \"\\\\(\\\\)\") {print}' $OCI_LIB | bat -l bash --color=always --style=numbers" \
+            --delimiter="  +" \
+            --with-nth=1,2 \
+            --preview="awk -v func_name={1} '/^#|^[[:space:]]*$/ { buf = buf \$0 \"\\n\"; next } \$0 ~ \"^\" func_name \"\\\\(\\\\)\" { print buf \$0; in_func = 1; buf = \"\"; next } in_func { print \$0; if (\$0 ~ /^}/) exit } { buf = \"\" }' {3} | bat -l bash --color=always --style=numbers" \
             --preview-window="right:65%:wrap" \
         | awk '{print $1}')
 

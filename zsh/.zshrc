@@ -43,45 +43,16 @@ plugins=(git zsh-autosuggestions zsh-syntax-highlighting fzf fzf-tab tmux)
 source $ZSH/oh-my-zsh.sh
 
 # ==========================================
-#  TAMATAR OS (The Trilogy)
+#  TAMATAR OS
 # ==========================================
 
-# 1. Oracle Infrastructure (oi)
-if [ -f ~/.dotfiles/zsh/oci_functions.zsh ]; then
-    source ~/.dotfiles/zsh/oci_functions.zsh
-fi
-
-# 2. Azure Infrastructure (azr)
-if [ -f ~/.dotfiles/zsh/azr_functions.zsh ]; then
-    source ~/.dotfiles/zsh/azr_functions.zsh
-fi
-
-# 2. Artificial Intelligence (ai)
-if [ -f ~/.dotfiles/zsh/ai_functions.zsh ]; then
-    source ~/.dotfiles/zsh/ai_functions.zsh
-fi
-
-# 3. Git Intelligence Layer
-if [ -f ~/.dotfiles/zsh/git_functions.zsh ]; then
-    source ~/.dotfiles/zsh/git_functions.zsh
-fi
-
-# 4. Local Utilities (util/sys)
-# This file contains 'util', 'jqe', 'proj', etc.
-if [ -f ~/.dotfiles/zsh/functions.zsh ]; then
-    source ~/.dotfiles/zsh/functions.zsh
-fi
-
-# ==========================================
-#  THE KITCHEN (Unified Dashboard)
-# ==========================================
-if [ -f ~/.dotfiles/zsh/kitchen.zsh ]; then
-    source ~/.dotfiles/zsh/kitchen.zsh
+# Unified Dashboard & Function Loader
+if [ -f ~/.dotfiles/zsh/tamatar.zsh ]; then
+    source ~/.dotfiles/zsh/tamatar.zsh
 fi
 
 # Bind to CTRL+k
 bindkey '^k' kit
-
 
 # ==========================================
 #  TOOLS & ALIASES
@@ -126,7 +97,6 @@ bindkey '^[OA' up-line-or-search
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 [ -s "/home/kiran/.bun/_bun" ] && source "/home/kiran/.bun/_bun"
-
 
 # ==========================================
 #  FZF & FZF-TAB STYLING

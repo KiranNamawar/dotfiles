@@ -2,9 +2,14 @@
 # ------------------------------------------
 # NOTIFICATIONS (Ntfy.sh)
 # ------------------------------------------
-# Default Topic (Change this to your secret topic)
+# Default Topic
 export NTFY_TOPIC="tamatar_notifications"
-
+# ------------------------------------------
+# NAME: notify
+# DESC: Notifications - Send alerts via ntfy.sh
+# USAGE: notify [-t topic] "Message"
+# TAGS: alert, ntfy, push, notification
+# ------------------------------------------
 notify() {
     # 1. Set Defaults
     local topic="${NTFY_TOPIC}"
@@ -71,8 +76,12 @@ alias alert=notify
 # ==========================================
 #  TUNNEL (Public Localhost)
 # ==========================================
-# Usage: tunnel 3000
-#        tunnel 8080
+# ------------------------------------------
+# NAME: tunnel
+# DESC: Public Localhost - Expose local port to web
+# USAGE: tunnel <port>
+# TAGS: tunnel, proxy, cloudflare, demo
+# ------------------------------------------
 tunnel() {
     emulate -L zsh
     unsetopt monitor

@@ -2,97 +2,50 @@
 #  AZURE (SKY) COMPLETIONS
 # ==========================================
 
-# --- SILO (PostgreSQL) ---
+# --- SILO ---
 _silo_comp() {
-    _arguments '1:SQL Query (or interactive)'
+    _arguments "1:subcommand:(backup restore)" "2:database"
 }
 
-# --- HIVE (Cosmos DB) ---
-_hive_comp() {
-    _arguments '1:Mongo Command (e.g. "db.stats()")'
-}
-
-# --- LEDGER (SQL Server) ---
-_ledger_comp() {
-    _arguments '1:T-SQL Query (or interactive)'
-}
-
-# --- TRUNK (File Share) ---
+# --- TRUNK ---
 _trunk_comp() {
-    local -a cmds
-    cmds=(
-        'mount:Open Trunk (Auto-Enables VPN)'
-        'unmount:Close Trunk (Disables VPN)'
-        'ls:List contents'
-    )
-
-    _arguments -C '1: :->cmds' '*:: :->args'
-    case $state in
-        cmds) _describe 'command' cmds ;;
-        args)
-            case $line[1] in
-                mount) _message "Mounts 100GB to ~/trunk" ;;
-                *) _message "" ;;
-            esac ;;
-    esac
+    _arguments "1:subcommand:(mount unmount ls)"
 }
 
-# --- SAY (Text to Speech) ---
+# --- REM ---
+_rem_comp() {
+    _arguments "1:description" "2:command"
+}
+
+# --- OOPS ---
+_oops_comp() {
+    _arguments "1:error_msg" "2:fix_command"
+}
+
+# --- READ-PDF ---
+_read_pdf_comp() {
+    _arguments "1:pdf_file:_files -g '*.pdf'"
+}
+
+# --- SAY/HEY ---
 _say_comp() {
-    _arguments '1:Text to speak'
+    _arguments "1:text_or_command"
 }
 
-# --- HEY (Jarvis Mode - FINAL REFINEMENT) ---
-_hey_comp() {
-    local context state state_descr line
-    typeset -A opt_args
+# --- HIVE/LEDGER ---
+_hive_comp() { _arguments "1:mongo_command" }
+_ledger_comp() { _arguments "1:sql_query" }
 
-    # 1. Define custom AI tools
-    local -a ai_tools
-    ai_tools=(
-        'stop:Silence Audio'
-        'ask:General Q&A'
-        'research:Web Search'
-        'summarize:Shorten Text'
-        'why:Explain Error'
-        'audit:Security Scan'
-        'explain:Explain Code'
-        'rx:Regex Generator'
-        'pick:Extract Data'
-    )
-
-    # Arguments:
-    _arguments -C \
-        '1:AI Tool/Question:->command_or_question' \
-        '*::Args:->args'
-
-    case $state in
-        command_or_question)
-            _describe 'AI Tool' ai_tools
-            return
-            ;;
-        args)
-            # Logic for custom tools (remains the same)
-            case $line[1] in
-                ask|research|rx|explain)
-                    _message "Query string"
-                    ;;
-                summarize|why|audit|pick)
-                    _arguments '1:Input File (Optional):_files'
-                    ;;
-                *)
-                    _message "Arguments for $line[1]"
-                    ;;
-            esac
-            ;;
-    esac
-}
-
+# --- LOAD-ENV ---
+_load_env_comp() { _arguments }
 
 # --- REGISTER COMPLETIONS ---
 compdef _silo_comp silo
+compdef _trunk_comp trunk
+compdef _rem_comp rem
+compdef _oops_comp oops
+
+compdef _say_comp say hey
 compdef _hive_comp hive
 compdef _ledger_comp ledger
-compdef _trunk_comp trunk
-compdef _say_comp say
-compdef _hey_comp hey
+compdef _load_env_comp load-env

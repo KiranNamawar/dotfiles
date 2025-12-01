@@ -1,9 +1,8 @@
-
 # ==========================================
 #  TAMATAR GIT INTELLIGENCE LAYER
 # ==========================================
 # Extra-lazy git on top of:
-# - recall  (Postgres vector DB)
+# - memory  (AstraDB vector DB)
 # - Groq / Gemini (AI)
 # - Your existing gcmt / rask / ask patterns
 # ==========================================
@@ -37,8 +36,8 @@ _gitb_ensure_ai() {
     if ! command -v _call_groq >/dev/null 2>&1 || ! command -v _get_embedding >/dev/null 2>&1; then
         [ -f ~/.dotfiles/zsh/ai_functions.zsh ] && source ~/.dotfiles/zsh/ai_functions.zsh
     fi
-    if ! command -v recall >/dev/null 2>&1; then
-        [ -f ~/.dotfiles/zsh/azr_functions.zsh ] && source ~/.dotfiles/zsh/azr_functions.zsh
+    if ! command -v memory >/dev/null 2>&1; then
+        [ -f ~/.dotfiles/zsh/ai_functions.zsh ] && source ~/.dotfiles/zsh/ai_functions.zsh
     fi
 }
 
@@ -66,10 +65,12 @@ ${files}
 EOF
 }
 
-# ==========================================
-# 1. GCMT (Semantic Commit Writer) – moved here
-# ==========================================
-# Usage: gcmt (inside git repo)
+# ------------------------------------------
+# NAME: gcmt
+# DESC: Semantic Commit - AI writes your commit message
+# USAGE: gcmt
+# TAGS: git, commit, ai, semantic
+# ------------------------------------------
 gcmt() {
     _gitb_ensure_repo || return 1
     _gitb_ensure_ai
@@ -93,13 +94,16 @@ gcmt() {
     sys="You are a Semantic Git Commit Writer.
 Rules:
 1. First line: <type>(<scope>): <subject> (max 50 chars, imperative).
-2. Scope should usually be the folder or area touched (e.g. zsh, infra, db, git, cli).
-3. Body: Only if needed, up to 3 bullet points.
+2. Scope should usually be the folder or area touched.
+3. Body: Provide a concise but detailed summary. Group changes by component if possible.
 4. Do NOT mention AI or tools.
 5. Output ONLY the raw commit message, no markdown, no backticks."
 
     user_prompt="Repo: ${repo_name}
 Branch: ${branch}
+
+Files Changed:
+$(git diff --cached --name-status)
 
 Diff (staged only):
 ${diff_content}"
@@ -121,9 +125,9 @@ ${diff_content}"
         y|Y)
             if git commit -m "$msg"; then
                 # Push into long-term memory: commit summary only
-                if command -v recall >/dev/null 2>&1; then
+                if command -v memory >/dev/null 2>&1; then
                     local memory="[$repo_name] $msg (Branch: $branch)"
-                    ( recall add "$memory" "Git: $repo_name" >/dev/null 2>&1 ) &|
+                    ( memory add "$memory" "Git: $repo_name" >/dev/null 2>&1 ) &|
                     echo "🧠 Commit memorized."
                 fi
             fi
@@ -137,14 +141,12 @@ ${diff_content}"
     esac
 }
 
-# ==========================================
-# 2. GMEM (Git Memory Manager)
-# ==========================================
-# Usage:
-#   gmem index [N]      # index last N commits (default 50)
-#   gmem backfill       # index whole history (with confirm)
-#   gmem ls             # show recent commits (from git)
-#   gmem status         # just prints some info
+# ------------------------------------------
+# NAME: gmem
+# DESC: Git Memory - Index commits to vector DB
+# USAGE: gmem [index|backfill|ls|status]
+# TAGS: git, memory, index, vector
+# ------------------------------------------
 gmem() {
     local sub="$1"; shift 2>/dev/null || true
     _gitb_ensure_repo || return 1
@@ -169,12 +171,12 @@ gmem() {
                 local blob
                 blob=$(_gitb_commit_blob "$sha" "$repo_name" "$branch")
 
-                # Use recall to embed + store (Postgres)
-                if command -v recall >/dev/null 2>&1; then
-                    recall add "$blob" "Git: $repo_name" >/dev/null 2>&1
+                # Use memory to embed + store (AstraDB)
+                if command -v memory >/dev/null 2>&1; then
+                    memory add "$blob" "Git: $repo_name" >/dev/null 2>&1
                     echo "   ✓ $sha"
                 else
-                    echo "   ⚠️ recall not available, skipping $sha" >&2
+                    echo "   ⚠️ memory not available, skipping $sha" >&2
                 fi
             done
             ;;
@@ -193,8 +195,8 @@ gmem() {
                 [ -z "$sha" ] && continue
                 local blob
                 blob=$(_gitb_commit_blob "$sha" "$repo_name" "$branch")
-                if command -v recall >/dev/null 2>&1; then
-                    recall add "$blob" "Git: $repo_name" >/dev/null 2>&1
+                if command -v memory >/dev/null 2>&1; then
+                    memory add "$blob" "Git: $repo_name" >/dev/null 2>&1
                     echo "   ✓ $sha"
                 fi
             done
@@ -220,7 +222,7 @@ gmem() {
             total=$(git rev-list --count HEAD)
             echo "📊 Git Memory Status for [$repo_name]:"
             echo "   Total commits in repo: $total"
-            echo "   (Memory lives in Postgres via recall, scoped by source='Git: $repo_name')"
+            echo "   (Memory lives in AstraDB via memory, scoped by source='Git: $repo_name')"
             ;;
 
         *)
@@ -233,10 +235,12 @@ gmem() {
     esac
 }
 
-# ==========================================
-# 3. GASK (Ask Git – talk to your commits)
-# ==========================================
-# Usage: gask "why did I add tempdb?"
+# ------------------------------------------
+# NAME: gask
+# DESC: Git Ask - Chat with your repo history
+# USAGE: gask "question"
+# TAGS: git, ask, chat, history
+# ------------------------------------------
 gask() {
     _gitb_ensure_repo || return 1
     _gitb_ensure_ai
@@ -293,13 +297,12 @@ Instructions:
     _render_output "$RESULT"
 }
 
-# ==========================================
-# 4. GWHY (Explain one commit)
-# ==========================================
-# Usage:
-#   gwhy            # explain HEAD
-#   gwhy <sha>      # explain that commit
-#   gwhy pick       # interactive pick
+# ------------------------------------------
+# NAME: gwhy
+# DESC: Git Explain - Explain a commit
+# USAGE: gwhy [sha|pick]
+# TAGS: git, explain, commit, why
+# ------------------------------------------
 gwhy() {
     _gitb_ensure_repo || return 1
     _gitb_ensure_ai
@@ -347,14 +350,17 @@ Task:
     _render_output "$RESULT"
 }
 
-# ==========================================
-# 5. GLOG (Interactive log explorer)
-# ==========================================
-# Usage: glog
+
 
 # Make sure any old alias doesn't conflict
 unalias glog 2>/dev/null
 
+# ------------------------------------------
+# NAME: glog
+# DESC: Git Log - Interactive log explorer
+# USAGE: glog
+# TAGS: git, log, explore, fzf
+# ------------------------------------------
 glog() {
     _gitb_ensure_repo || return 1
 
@@ -387,37 +393,12 @@ glog() {
 }
 
 
-# ==========================================
-# 8. GDEV — The Developer Brain
 # ------------------------------------------
-# Purpose:
-#   Deep code intelligence. Combines:
-#     • commit memory (recall + gmem text)
-#     • git history & diffs
-#     • file awareness (auto-detected files)
-#     • project structure (tree view)
-#
-#   Automatically:
-#     ✓ Queries semantic memory via `recall`
-#     ✓ Finds related commits via git log/grep
-#     ✓ Extracts file paths from commit/memory text
-#     ✓ Loads current file contents (truncated)
-#     ✓ Includes project tree context
-#     ✓ Builds rich system prompt (guru-style)
-#     ✓ Sends everything to Gemini (RAG-style)
-#
-# Usage:
-#   gdev "How does tempdb work?"
-#   gdev "Why did I add stock?"
-#   gdev "Where is clip implemented?"
-#
-# Behavior:
-#   If any history/files are found → Deep full-context answer
-#   If not → Falls back to `guru` (light tree + optional -f files)
-#
-# Model:
-#   Gemini 2.5 Flash (Context + Search enabled)
-# ==========================================
+# NAME: gdev
+# DESC: Developer Brain - Deep code intelligence
+# USAGE: gdev "question"
+# TAGS: git, dev, ai, code
+# ------------------------------------------
 gdev() {
     emulate -L zsh
 
@@ -437,11 +418,11 @@ gdev() {
     repo_root=$(git rev-parse --show-toplevel)
     repo_name=$(basename "$repo_root")
 
-    echo "🔍 Getting relevant history from recall..." >&2
+    echo "🔍 Getting relevant history from memory..." >&2
     local memory_ctx=""
-    if command -v recall >/dev/null 2>&1; then
+    if command -v memory >/dev/null 2>&1; then
         # Use the same prefix gmem uses: [repo_name] ...
-        memory_ctx=$(recall "[$repo_name] $query" 2>/dev/null)
+        memory_ctx=$(memory search "[$repo_name] $query" 2>/dev/null)
     fi
 
     echo "📜 Scanning git history..." >&2
@@ -531,7 +512,7 @@ ${related_commits:-'(no specific matching commits found)'}
 [[ LATEST DIFF (HEAD~1..HEAD) ]]
 ${git_head_diff:-'(no recent diff available)'}
 
-[[ SEMANTIC MEMORY (recall hits) ]]
+[[ SEMANTIC MEMORY (memory hits) ]]
 ${memory_ctx:-'(no external memory hits – answer from git + code)'}
 
 [[ FILE CONTENTS (truncated) ]]

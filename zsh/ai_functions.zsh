@@ -152,6 +152,26 @@ _get_embedding() {
 }
 
 # ------------------------------------------
+# AstraDB API Caller (Global Helper)
+# ------------------------------------------
+_astra_req() {
+    local endpoint="$1"
+    local payload="$2"
+    local API=$(_get_key "ASTRA_API_ENDPOINT")
+    local TOKEN=$(_get_key "ASTRA_DB_TOKEN")
+
+    if [[ -z "$API" || -z "$TOKEN" ]]; then
+        echo "❌ Error: Astra credentials missing." >&2
+        return 1
+    fi
+
+    curl -s --max-time 30 --connect-timeout 5 -X POST "$API/api/json/v1/default_keyspace/$endpoint" \
+        -H "Token: $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$payload"
+}
+
+# ------------------------------------------
 # OpenRouter API Caller (File-Based Reliability)
 # ------------------------------------------
 _call_openrouter() {
@@ -225,15 +245,15 @@ except Exception:
     echo "$answer"
 }
 
-# ==========================================
-# 21. MEMORY (AstraDB Vector Client)
-# ==========================================
-# Purpose: Massive long-term AI memory (80GB Free).
-# Usage:   memory                 (Interactive Shell)
-#          memory add "text"      (Save)
-#          memory search "query"  (Search)
+
+# ------------------------------------------
+# NAME: memory
+# DESC: AstraDB Vector Client - Massive long-term AI memory
+# USAGE: memory [init|add|search]
+# TAGS: memory, vector, astra, db
+# ------------------------------------------
 memory() {
-    # 1. Load Secrets
+    # 1. Load Secrets (Check only)
     local API=$(_get_key "ASTRA_API_ENDPOINT")
     local TOKEN=$(_get_key "ASTRA_DB_TOKEN")
     
@@ -242,18 +262,12 @@ memory() {
         return 1
     fi
 
-    # Helper: API Call
-    _astra_req() {
-        local endpoint="$1"
-        local payload="$2"
-        curl -s -X POST "$API/api/json/v1/default_keyspace/$endpoint" \
-            -H "Token: $TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$payload"
-    }
+    local CMD="$1"
+    local ARG2="$2"
+    local ARG3="$3"
 
-    # --- INTERACTIVE MODE ---
-    if [[ -z "$1" ]]; then
+    # Default to interactive if no args, OR search if arg1 is not a command
+    if [[ -z "$CMD" ]]; then
         echo "🧠 Tamatar Memory Console (AstraDB)"
         echo "   Type 'help' for commands, 'exit' to quit."
         
@@ -261,7 +275,6 @@ memory() {
         while vared -p "%F{cyan}memory>%f " -c line; do
             if [[ "$line" == "exit" || "$line" == "quit" ]]; then break; fi
             if [[ -n "$line" ]]; then 
-                # Use 'eval' to properly split quoted strings in the line
                 eval "memory $line"
             fi
             line=""
@@ -269,10 +282,6 @@ memory() {
         echo "👋 Disconnected."
         return
     fi
-
-    local CMD="$1"
-    local ARG2="$2"
-    local ARG3="$3"
 
     case "$CMD" in
         init)
@@ -314,7 +323,35 @@ memory() {
             if echo "$OUT" | grep -q "insertedIds"; then echo " ✅ Saved."; else echo " ❌ Failed: $OUT"; fi
             ;;
 
-        ask|search|recall)
+        ls|list|log)
+            echo "🔍 Recent Memories:"
+            # Astra doesn't support simple "last 10" easily without vector sort, but we can try find with limit
+            local JSON='{"find": {"options": {"limit": 10}, "projection": {"content": 1, "metadata": 1, "created_at": 1}}}'
+            local RESPONSE=$(_astra_req "library" "$JSON")
+            if ! echo "$RESPONSE" | jq -e . >/dev/null 2>&1; then
+                echo "❌ Error: Database returned invalid JSON (Corrupt memory?)"
+                echo "💡 Suggestion: Run 'memory clean' to wipe bad data."
+                return 1
+            fi
+            echo "$RESPONSE" | jq -r '.data.documents[] | "👉 \(.created_at // "N/A") [\(.metadata.source // "manual")]\n   \(.content | .[0:60])..."'
+            ;;
+
+        clean|wipe)
+            echo -n "⚠️  DANGER: Wipe ALL memory (AstraDB)? [y/N] "
+            read -r confirm
+            if [[ "$confirm" == "y" ]]; then
+                 # Drop and recreate is often cleaner for "wipe" in NoSQL
+                 _astra_req "" '{"deleteCollection": {"name": "library"}}'
+                 echo "⏳ Waiting for cleanup..."
+                 sleep 2
+                 _astra_req "" '{"createCollection": {"name": "library", "options": {"vector": {"dimension": 768, "metric": "cosine"}}}}'
+                echo "🧹 Memory wiped clean."
+            else
+                echo "❌ Aborted."
+            fi
+            ;;
+
+        ask|search|memory)
             if [ -z "$ARG2" ]; then echo "Usage: search <query>"; return 1; fi
             
             echo -n "🤔 Thinking..." >&2
@@ -338,7 +375,6 @@ memory() {
             
             if [[ "$COUNT" == "0" || -z "$COUNT" || "$COUNT" == "null" ]]; then
                  echo "📭 No memories found."
-                 # Debug: echo "$RESPONSE"
             else
                  echo "$RESPONSE" | jq -r '.data.documents[] | "\n👉 Match: \(.["$similarity"] | . * 100 | floor)%\n   Source: \(.metadata.source)\n   \(.content)"'
             fi
@@ -347,21 +383,26 @@ memory() {
         help)
             echo "  add <text> [source]   :: Memorize a fact"
             echo "  search <query>        :: Semantic search"
+            echo "  ls                    :: List recent memories"
+            echo "  clean                 :: Wipe database"
             echo "  init                  :: Setup database"
             echo "  exit                  :: Close console"
             ;;
 
-        *) echo "Usage: memory {init | add | search}";;
+        *) 
+            # Implicit Search if not a command
+            memory search "$CMD" "$ARG2"
+            ;;
     esac
 }
 
-# --- public functions ---
 
-# 1. ask
-# purpose: general purpose q&a for linux/coding.
-# model: llama 3.1 8b (fastest response)
-# usage: ask "how do i unzip tar.gz"
-#        echo "error text" | ask "explain this"
+# ------------------------------------------
+# NAME: ask
+# DESC: General Q&A - Ask Linux/Coding questions
+# USAGE: ask "question"
+# TAGS: q&a, help, linux, code
+# ------------------------------------------
 ask() {
     local sys_prompt="You are a Linux CLI expert. Provide concise, accurate answers. Output Markdown."
     local user_prompt=""
@@ -380,11 +421,13 @@ ask() {
     _render_output "$result"
 }
 
+
 # ------------------------------------------
-# 1. THINK (Reasoning Engine)
+# NAME: think
+# DESC: Deep Reasoning - Solve complex logic/math problems
+# USAGE: think "problem"
+# TAGS: reasoning, logic, math, deepseek
 # ------------------------------------------
-# Purpose: Deep reasoning for complex logic/math.
-# Usage:   think "solve the logic puzzle"
 think() {
     local input="$*"
     if [ -z "$input" ]; then echo "Usage: think <complex_problem>"; return 1; fi
@@ -400,11 +443,13 @@ think() {
     _render_output "$result"
 }
 
+
 # ------------------------------------------
-# 2. DIGEST (Massive Context Analyzer)
+# NAME: digest
+# DESC: Mass Context Analyzer - Analyze large files/logs
+# USAGE: cat huge.log | digest "Find errors"
+# TAGS: analyze, logs, context, grok
 # ------------------------------------------
-# Purpose: Analyze large files/logs using Grok 4.1 (2M context).
-# Usage:   cat huge.log | digest "Find errors"
 digest() {
     local PROMPT="$1"
     local FILE="$2"
@@ -430,11 +475,13 @@ digest() {
     _render_output "$result"
 }
 
+
 # ------------------------------------------
-# 3. AGENT (Software Engineer)
+# NAME: agent
+# DESC: Software Engineer - Write code/files
+# USAGE: agent "instruction" > file.py
+# TAGS: code, write, generate, engineer
 # ------------------------------------------
-# Purpose: Write code/files using Kwaipilot KAT-Coder (256k Context).
-# Usage:   agent "Create a Python script" > script.py
 agent() {
     local input="$*"
     local context=""
@@ -446,18 +493,31 @@ agent() {
     if [ -z "$input" ]; then echo "Usage: agent <instruction>"; return 1; fi
     
     local model="kwaipilot/kat-coder-pro:free"
+    
+    # 1. Search Memory for Guidelines
+    local mem_ctx=""
+    if command -v memory >/dev/null 2>&1; then
+        mem_ctx=$(memory search "Dev Guidelines: $input" 2>/dev/null | head -c 2000)
+    fi
+
     local sys="You are an Elite Software Engineer. 
     Task: Write high-quality, production-ready code based on the user's instruction.
-    Rules: Output ONLY the code. No markdown backticks."
+    Rules: Output ONLY the code. No markdown backticks.
+    
+    [[ MEMORY CONTEXT ]]
+    $mem_ctx"
     
     local result=$(_call_openrouter "$sys" "$context$input" "$model")
     echo "$result" | sed 's/^```[a-z]*//g' | sed 's/^```//g'
 }
 
-# 9. VISION
-# Purpose: Analyze images/screenshots.
-# Model: Gemini 2.5 Flash (Multimodal)
-# Usage: vision screenshot.png "What is the error here?"
+
+# ------------------------------------------
+# NAME: vision
+# DESC: Image Analyzer - Analyze images/screenshots
+# USAGE: vision <file> [prompt]
+# TAGS: image, vision, analyze, screenshot
+# ------------------------------------------
 vision() {
     local api_key=$(_get_key "GEMINI_API_KEY" "GEMINI_API_KEY")
     if [ -z "$api_key" ]; then echo "❌ Error: GEMINI_API_KEY missing."; return 1; fi
@@ -499,11 +559,13 @@ vision() {
     _render_output "$answer"
 }
 
-# 2. REFACTOR
-# Purpose: Rewrites code to be cleaner, secure, and documented.
-# Model: Llama 3.3 70B (Smart logic needed)
-# Usage: cat script.sh | refactor
-#        refactor < script.py
+
+# ------------------------------------------
+# NAME: refactor
+# DESC: Code Refactor - Clean, optimize, and document code
+# USAGE: cat file | refactor
+# TAGS: code, clean, optimize, refactor
+# ------------------------------------------
 refactor() {
     local input="${1:-$(cat)}"
     if [ -z "$input" ]; then echo "Usage: refactor < file"; return 1; fi
@@ -513,11 +575,13 @@ refactor() {
     _render_output "$result"
 }
 
-# 3. MORPH
-# Purpose: Converts data formats (JSON <-> CSV <-> YAML <-> Tables).
-# Model: Llama 3.3 70B (Smart instruction following)
-# Usage: cat data.csv | morph "json"
-#        vault ls | morph "markdown table"
+
+# ------------------------------------------
+# NAME: morph
+# DESC: Data Converter - Convert between JSON, CSV, YAML, etc.
+# USAGE: cat data | morph "format"
+# TAGS: convert, data, json, csv, yaml
+# ------------------------------------------
 morph() {
     local target="$1"
     local input="${2:-$(cat)}"
@@ -531,11 +595,13 @@ morph() {
     echo "$result"
 }
 
-# 4. AUDIT
-# Purpose: Scans configs for security risks.
-# Model: Llama 3.3 70B (Smart reasoning)
-# Usage: cat nginx.conf | audit
-#        cat /etc/ssh/sshd_config | audit
+
+# ------------------------------------------
+# NAME: audit
+# DESC: Security Auditor - Scan configs for vulnerabilities
+# USAGE: cat config | audit
+# TAGS: security, audit, scan, config
+# ------------------------------------------
 audit() {
     local input="${1:-$(cat)}"
     local sys="You are a Security Auditor. Scan for vulnerabilities. Output a Checklist: ❌ CRITICAL, ⚠️ WARNING, ✅ SAFE."
@@ -543,22 +609,38 @@ audit() {
     _render_output "$result"
 }
 
-# 5. WHY
-# Purpose: Explains errors and provides fixes.
-# Model: Llama 3.3 70B (Smart debugging)
-# Usage: python main.py 2>&1 | why
-#        docker build . 2>&1 | why
+
+# ------------------------------------------
+# NAME: why
+# DESC: Error Explainer - Debug errors and stacktraces
+# USAGE: command 2>&1 | why
+# TAGS: debug, error, explain, fix
+# ------------------------------------------
 why() {
     local input="${1:-$(cat)}"
-    local sys="You are a Senior Debugger. Explain the error root cause in 1 sentence. Provide 3 fix steps."
+    
+    # 1. Search Memory for Past Fixes
+    local mem_ctx=""
+    if command -v memory >/dev/null 2>&1; then
+        mem_ctx=$(memory search "Troubleshooting: $input" 2>/dev/null | head -c 2000)
+    fi
+
+    local sys="You are a Senior Debugger. Explain the error root cause in 1 sentence. Provide 3 fix steps.
+    
+    [[ MEMORY CONTEXT (Past Fixes) ]]
+    $mem_ctx"
+
     local result=$(_call_groq "$sys" "$input" "llama-3.3-70b-versatile")
     _render_output "$result"
 }
 
-# 6. SUMMARIZE
-# Purpose: Condenses logs or long text into bullet points.
-# Model: Llama 3.1 8B (Fast compression)
-# Usage: cat access.log | summarize
+
+# ------------------------------------------
+# NAME: summarize
+# DESC: Text Summarizer - Condense logs or text
+# USAGE: cat file | summarize
+# TAGS: summarize, logs, text, condense
+# ------------------------------------------
 summarize() {
     local input="${1:-$(cat)}"
     local sys="Summarize into 3-5 bullet points. Capture key technical details."
@@ -567,11 +649,12 @@ summarize() {
 }
 
 
-# 8. GURU
-# Purpose: Context-aware project architect. Knows your file structure.
-# Model: Gemini 2.5 Flash (Context + Search)
-# Usage: guru "How do I run this?"
-#        guru -f main.rs "Refactor this file"
+# ------------------------------------------
+# NAME: guru
+# DESC: Project Architect - Context-aware Q&A about your project
+# USAGE: guru "question"
+# TAGS: architect, project, context, q&a
+# ------------------------------------------
 guru() {
     local context_files=""
     local user_prompt=""
@@ -631,10 +714,12 @@ If something is unclear, you MAY use Google Search as a secondary source."
 }
 
 
-# 10. RESEARCH
-# Purpose: Search the live web for current info.
-# Model: Gemini 2.5 Flash (Web Grounding)
-# Usage: research "Fedora 41 release date"
+# ------------------------------------------
+# NAME: research
+# DESC: Web Researcher - Search live web
+# USAGE: research "topic"
+# TAGS: search, web, google, research
+# ------------------------------------------
 research() {
     local prompt="$*"
     if [ -z "$prompt" ]; then echo "Usage: research 'topic'"; return 1; fi
@@ -642,11 +727,13 @@ research() {
     _render_output "$result"
 }
 
-# 11. RX (Regex Generator)
-# Purpose: Generates complex regex patterns.
-# Model: Llama 3.3 70B (High Logic)
-# Usage: rx "email address"
-#        grep -E $(rx "phone number") file.txt
+
+# ------------------------------------------
+# NAME: rx
+# DESC: Regex Generator - Create complex regex patterns
+# USAGE: rx "description"
+# TAGS: regex, generate, pattern
+# ------------------------------------------
 rx() {
     local input="$*"
     if [ -z "$input" ]; then echo "Usage: rx 'pattern description'"; return 1; fi
@@ -659,10 +746,13 @@ rx() {
     echo "$result"
 }
 
-# 12. PICK (Extractor)
-# Purpose: Extracts specific data from messy text.
-# Model: Llama 3.3 70B (High Logic)
-# Usage: cat logs | pick "IP addresses"
+
+# ------------------------------------------
+# NAME: pick
+# DESC: Data Extractor - Extract entities from text
+# USAGE: cat text | pick "entities"
+# TAGS: extract, data, entities, pick
+# ------------------------------------------
 pick() {
     local target="$1"
     local input="${2:-$(cat)}"
@@ -675,10 +765,13 @@ pick() {
     echo "$result"
 }
 
-# 13. EXPLAIN (Decoder)
-# Purpose: Breaks down complex commands or regex.
-# Model: Llama 3.3 70B (High Logic)
-# Usage: explain "chmod 755"
+
+# ------------------------------------------
+# NAME: explain
+# DESC: Command Explainer - Explain code or commands
+# USAGE: explain "command"
+# TAGS: explain, command, code, teach
+# ------------------------------------------
 explain() {
     local input="${1:-$(cat)}"
     local sys="You are a Technical Educator. Explain the code/command component by component. Be concise."
@@ -686,14 +779,13 @@ explain() {
     _render_output "$result"
 }
 
+
 # ------------------------------------------
-# 14. JSQL (Jam SQL Generator)
+# NAME: jsql
+# DESC: SQL Generator - Generate MySQL queries
+# USAGE: jsql "description"
+# TAGS: sql, generate, mysql, jam
 # ------------------------------------------
-# Purpose: Generates strict SQL for MySQL (Jam) based on actual schema.
-# Model: Llama 3.3 70B (Logic)
-# Usage: jsql "show tasks pending"
-#        jsql -d my_app "count active users"
-#        jam -e "$(jsql "delete old logs")"
 jsql() {
     local target_db="utils"
     local user_prompt=""
@@ -742,13 +834,13 @@ jsql() {
     echo "$result"
 }
 
+
 # ------------------------------------------
-# 15. JASK (Generate & Execute SQL)
+# NAME: jask
+# DESC: SQL Runner - Generate and run SQL on Jam
+# USAGE: jask "description"
+# TAGS: sql, run, execute, jam
 # ------------------------------------------
-# Purpose: Generates SQL via AI, confirms with user, then runs it on Jam.
-# Model: Llama 3.3 70B (via jsql)
-# Usage: jask "show 5 newest tasks"
-#        jask -d my_db "count users"
 jask() {
     # Pass all arguments to jsql to handle flags like -d
     local sql=$(jsql "$@")
@@ -774,13 +866,13 @@ jask() {
     fi
 }
 
+
 # ------------------------------------------
-# 15. JQ GENERATOR (jqg)
+# NAME: jqg
+# DESC: JQ Generator - Generate JQ filters
+# USAGE: jqg "description"
+# TAGS: jq, generate, filter, json
 # ------------------------------------------
-# Purpose: Generates complex JQ filters from natural language.
-# Model: Llama 3.3 70B (Logic)
-# Usage: jqg "get all values of key 'id'"
-#        head -n 20 data.json | jqg "extract users with role admin"
 jqg() {
     local goal="$*"
     local json_context=""
@@ -819,12 +911,13 @@ jqg() {
     echo "$result"
 }
 
+
 # ------------------------------------------
-# 16. JQA (Generate & Apply JQ)
+# NAME: jqa
+# DESC: JQ Applier - Generate and apply JQ filter
+# USAGE: cat json | jqa "description"
+# TAGS: jq, apply, filter, json
 # ------------------------------------------
-# Purpose: Pipes JSON, asks AI for a filter, and executes it immediately.
-# Usage: cat file.json | jqa "get all users"
-#        curl api | jqa "extract only the id and status"
 jqa() {
     local goal="$1"
     if [ -z "$goal" ]; then echo "Usage: cat file.json | jqa 'filter description'"; return 1; fi
@@ -861,8 +954,12 @@ jqa() {
     rm "$tmp_file"
 }
 
+
 # ------------------------------------------
-# 17. SEARCH (Smart Polyglot Finder)
+# NAME: search
+# DESC: Smart Finder - Find files or grep text
+# USAGE: search "description"
+# TAGS: search, find, grep, file
 # ------------------------------------------
 search() {
     local description="$*"
@@ -917,10 +1014,13 @@ search() {
     esac
 }
 
-# ==========================================
-# RASK (Retrieval Augmented Ask)
-# ==========================================
-# Usage: rask "What is the project X config?"
+
+# ------------------------------------------
+# NAME: rask
+# DESC: Retrieval Ask - Chat with your memory
+# USAGE: rask "question"
+# TAGS: ask, memory, chat
+# ------------------------------------------
 rask() {
     local QUERY="$1"
     if [ -z "$QUERY" ]; then echo "Usage: rask <question>"; return 1; fi
@@ -928,13 +1028,20 @@ rask() {
     # 1. Search Memory (Recall)
     echo -n "🧠 Recalling..." >&2
     
-    # We need a raw version of recall search here.
+    # We need a raw version of memory search here.
     # We embed the query manually to get the vector.
     local Q_VEC=$(_get_embedding "$QUERY")
     
-    # Fetch Top 3 matches from Azure
-    local CONTEXT=$(SILO_DB=memory silo "SELECT content FROM items ORDER BY embedding <=> '$Q_VEC' LIMIT 3;" | grep -v "rows)" | grep -v "^--" | tr '\n' ' ')
+    # Fetch Top 3 matches from AstraDB
+    local JSON=$(jq -n \
+        --argjson vec "$Q_VEC" \
+        '{"find": {"sort": {"$vector": $vec}, "options": {"limit": 3}, "projection": {"content": 1, "metadata": 1}}}')
     
+    local RESPONSE=$(_astra_req "library" "$JSON")
+    
+    # Parse content
+    local CONTEXT=$(echo "$RESPONSE" | jq -r '.data.documents[].content' 2>/dev/null | tr '\n' ' ')
+
     if [ -z "$CONTEXT" ]; then
         echo " (No memory found)" >&2
         CONTEXT="No relevant memory found."
@@ -958,50 +1065,35 @@ rask() {
     _render_output "$RESULT"
 }
 
-# ==========================================
-#  AI LAUNCHER (The Master Menu)
-# ==========================================
-# Usage: ai
+
+# ------------------------------------------
+# NAME: ai
+# DESC: AI Launcher - Master menu for AI tools
+# USAGE: ai
+# TAGS: ai, launcher, menu, tools
+# ------------------------------------------
 ai() {
-    # 1. Define Location (Adjust if your dotfiles are elsewhere!)
-    local AI_LIB="$HOME/.dotfiles/zsh/ai_functions.zsh"
+    # 1. Define Location
+    local AI_LIB="${(%):-%x}"
+    if [ -z "$AI_LIB" ]; then AI_LIB="${BASH_SOURCE[0]}"; fi
 
-    # 2. Define the menu
-    local tools=(
-        "ask:General Q&A (Groq 8B)"
-        "refactor:Clean & Optimize Code (Groq 70B)"
-        "morph:Convert Data Formats (Groq 70B)"
-        "audit:Security Config Scanner (Groq 70B)"
-        "why:Debug Errors & Stacktraces (Groq 70B)"
-        "summarize:Summarize Logs/Text (Groq 8B)"
-        "gcmt:Write Semantic Git Commits (Gemini)"
-        "guru:Context-Aware Architect (Gemini)"
-        "vision:Analyze Images/Screenshots (Gemini)"
-        "research:Live Web Search (Gemini)"
-        "rx:Generate Regex Patterns (Groq 70B)"
-        "pick:Extract Data from Messy Text (Groq 70B)"
-        "explain:Explain Code/Commands (Groq 70B)"
-        "jsql:Generate MySQL Queries (Groq 70B)"
-        "jask:Generate & Run MySQL Query (Interactive)"
-        "jqg:Generate JQ Filter (Groq 70B)"
-        "jqa:Generate & Apply JQ Filter"
-        "search:AI File Finder (Groq 70B)"
-        "think:Deep Reasoning (DeepSeek)"
-    )
+    # 2. Build Dynamic Menu
+    local tools=()
+    while IFS= read -r line; do tools+=("$line"); done < <(_tmt_scan "$AI_LIB")
 
-    # 3. Run FZF with File-Based Preview
-    # The awk command reads the file in 'Paragraph Mode' (RS="")
-    # It prints the paragraph that contains "function_name()"
-    # This captures the comments above the function because there is no blank line between them.
-    
+    # 3. Run FZF
     local selected=$(printf "%s\n" "${tools[@]}" | column -t -s ":" | fzf \
         --height=60% \
         --layout=reverse \
         --border \
-        --header="🤖 Tamatar Intelligence Layer" \
+        --exact \
+        --tiebreak=begin \
+        --header="🧠 Tamatar Brain (AI Tools)" \
         --prompt="Select Tool > " \
-        --preview="awk -v func_name={1} 'BEGIN{RS=\"\"} \$0 ~ (\"(^|\\n)\" func_name \"\\\\(\\\\)\") {print}' $AI_LIB | bat -l zsh --color=always --style=numbers" \
-        --preview-window="right:65%:wrap" \
+        --delimiter="  +" \
+        --with-nth=1,2 \
+        --preview="awk -v func_name={1} '/^#|^[[:space:]]*$/ { buf = buf \$0 \"\\n\"; next } \$0 ~ \"^\" func_name \"\\\\(\\\\)\" { print buf \$0; in_func = 1; buf = \"\"; next } in_func { print \$0; if (\$0 ~ /^}/) exit } { buf = \"\" }' {3} | bat -l zsh --color=always --style=numbers" \
+        --preview-window="right:60%:wrap" \
         | awk '{print $1}')
 
     # 4. Push to Buffer

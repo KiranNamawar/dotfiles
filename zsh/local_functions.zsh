@@ -1,173 +1,25 @@
-
-# --- Load Other Functions
-if [ -f ~/.dotfiles/zsh/other_functions.zsh ]; then
-    source ~/.dotfiles/zsh/other_functions.zsh
-fi
-
+# ==========================================
+#  LOCAL UTILITIES
+# ==========================================
 
 # ------------------------------------------
-# JQE (JSON Query Explorer)
-# Usage: jqe file.json OR echo '{"a":1}' | jqe
-# ------------------------------------------
-jqe() {
-  local INPUT_FILE=$(mktemp /tmp/jqe_XXXXXX.json)
-  
-  # Ensure cleanup happens on EXIT, INT (Ctrl+C), or TERM
-  trap 'rm -f "$INPUT_FILE"' EXIT INT TERM
-
-  # 1. Input Handling
-  if [ -f "$1" ]; then
-    cat "$1" > "$INPUT_FILE"
-  elif [ -t 0 ]; then
-    echo "Usage: jqe <file> OR command | jqe"
-    return 1
-  else
-    cat > "$INPUT_FILE"
-  fi
-
-  # 2. Validity Check
-  if ! jq empty "$INPUT_FILE" 2>/dev/null; then
-    echo "❌ Error: Invalid JSON."
-    return 1
-  fi
-
-  # 3. Explorer (Same as before)
-  local SELECTED_PATH=$(jq -r 'paths | map(if type=="number" then "["+tostring+"]" else "[\""+tostring+"\"]" end) | join("") | "." + .' "$INPUT_FILE" \
-    | fzf --height 60% --layout=reverse --border --header="JSON Explorer" --preview "jq -C {1} $INPUT_FILE")
-
-  # 4. Output
-  if [ -n "$SELECTED_PATH" ]; then
-    local VALUE=$(jq -r "$SELECTED_PATH" "$INPUT_FILE")
-    if command -v wl-copy &> /dev/null; then echo -n "$VALUE" | wl-copy; fi
-    echo "✅ Copied: $SELECTED_PATH"
-    echo "$VALUE"
-  fi
-  # Trap handles rm "$INPUT_FILE" automatically
-}
-
-# ------------------------------------------
-# FUZZY CD (lsd edition)
-# ------------------------------------------
-fcd() {
-    # 1. Source: Use 'fd' (fast) or fallback to 'find'
-    local source_cmd
-    if command -v fd &> /dev/null; then
-        source_cmd="fd --type d --hidden --exclude .git"
-    else
-        source_cmd="find . -maxdepth 5 -type d -not -path '*/.*'"
-    fi
-
-    # 2. Preview: Use 'lsd' for the tree view
-    local preview_cmd
-    if command -v lsd &> /dev/null; then
-        # --tree: Recursive tree view
-        # --depth 2: Only show 2 levels deep (keeps preview clean)
-        # --color always: Keep colors inside fzf
-        preview_cmd="lsd --tree --depth 2 --color always --icon always {}"
-    elif command -v tree &> /dev/null; then
-        preview_cmd="tree -C -L 2 {}"
-    else
-        preview_cmd="ls -A --color=always {}"
-    fi
-
-    # 3. Run FZF
-    local dir=$(eval "$source_cmd" | fzf \
-        --height=50% \
-        --layout=reverse \
-        --border \
-        --prompt="📂 Go To > " \
-        --header="CTRL-E: Edit in Nvim | ENTER: Cd" \
-        --preview="$preview_cmd" \
-        --preview-window="right:50%:wrap" \
-        --bind "ctrl-e:execute(nvim {} > /dev/tty)" \
-    )
-
-    # 4. Execute
-    if [[ -n "$dir" ]]; then
-        cd "$dir"
-    fi
-}
-
-
-# ------------------------------------------
-# PROJECT SESSIONIZER (proj)
-# ------------------------------------------
-proj() {
-    local PROJECT_ROOT="$HOME/Projects"
-
-    # 1. SEARCH LOGIC (The Fix)
-    # We cd into root first so 'fd' returns relative paths (e.g., "test" instead of "/home/...")
-    # --max-depth 2: Prevents digging into 'src', 'public', etc.
-    #    Assumes structure is either Projects/Repo or Projects/Category/Repo
-    local selected=$(
-        cd "$PROJECT_ROOT" && \
-        fd --type d \
-           --min-depth 1 \
-           --max-depth 2 \
-           --hidden \
-           --exclude .git \
-           --exclude node_modules \
-           . \
-        | fzf \
-            --height=40% \
-            --layout=reverse \
-            --border \
-            --prompt="🚀 Launch Project > " \
-            --header="CTRL-R: Rescan" \
-            --preview="lsd --tree --depth 2 --color always --icon always --ignore-glob node_modules --ignore-glob .git $PROJECT_ROOT/{}" \
-            --preview-window="right:50%:wrap"
-    )
-
-    # Exit if cancelled
-    if [[ -z "$selected" ]]; then return; fi
-
-    # 2. PATH RECONSTRUCTION
-    # Since we selected a relative path, we add the root back
-    local full_path="$PROJECT_ROOT/$selected"
-    
-    # 3. SESSION NAMING
-    # "learn/react" -> "learn_react"
-    local session_name=$(echo "$selected" | tr . _ | tr / _ | sed s/_$//)
-
-    # 4. TMUX LOGIC
-    if ! tmux has-session -t="$session_name" 2> /dev/null; then
-        tmux new-session -ds "$session_name" -c "$full_path"
-    fi
-
-    if [ -n "$TMUX" ]; then
-        tmux switch-client -t "$session_name"
-    else
-        tmux attach-session -t "$session_name"
-    fi
-}
-
-# Bind to CTRL+P
-# Widget for fop
-_proj_widget() {
-    proj
-    zle reset-prompt
-}
-zle -N _proj_widget
-bindkey '^p' _proj_widget
-
-
-# ------------------------------------------
-# FUZZY OPEN (File or Dir -> Nvim)
+# NAME: fop
+# DESC: Fuzzy Open - Find and open files in Neovim
+# USAGE: fop
+# TAGS: nvim, find, open
 # ------------------------------------------
 fop() {
-    # 1. SETUP COMMANDS
-    # We prefer 'fd' because it's fast. Fallback to 'find'.
+    # 1. DEFINE SOURCE
+    # Use 'fd' if available, otherwise 'find'
     local find_cmd
     if command -v fd &> /dev/null; then
-        # Look for both files and dirs, ignore git/node_modules
-        find_cmd="fd --hidden --follow --exclude .git --exclude node_modules"
+        find_cmd="fd --type f --type d --hidden --follow --exclude .git --exclude node_modules"
     else
-        find_cmd="find . -maxdepth 5 -not -path '*/.*' -not -path '*/node_modules*'"
+        find_cmd="find . -maxdepth 5 -not -path '*/.*'"
     fi
 
-    # 2. HYBRID PREVIEW LOGIC
-    # - If it's a directory: use lsd tree
-    # - If it's a file: use bat (with syntax highlighting) or cat
+    # 2. DEFINE PREVIEW
+    # If directory -> tree; If file -> bat/cat
     local preview_cmd="if [ -d {} ]; then 
         lsd --tree --depth 1 --color always --icon always {}; 
     else 
@@ -221,7 +73,10 @@ bindkey '^o' _fop_widget
 
 
 # ------------------------------------------
-# TMUX KILLER (tkill)
+# NAME: tkill
+# DESC: Tmux Session Killer - Interactively kill tmux sessions
+# USAGE: tkill
+# TAGS: tmux, kill, session
 # ------------------------------------------
 tkill() {
     # 1. List sessions
@@ -237,11 +92,13 @@ tkill() {
     fi
 }
 
-# ==========================================
-#  IMAGE VIEWER (Smart)
-# ==========================================
-# Usage: view image.png         (Tries inline Kitty first)
-#        view -g image.png      (Forces GUI window)
+
+# ------------------------------------------
+# NAME: view
+# DESC: Smart Image Viewer - Uses Kitty inline or system viewer
+# USAGE: view [-g] <file>
+# TAGS: image, viewer, kitty
+# ------------------------------------------
 view() {
     local force_gui=0
     local file=""
@@ -278,12 +135,12 @@ view() {
 }
 
 
-# ==========================================
-#  FUZZY TEXT SEARCH (Live Grep)
-# ==========================================
-# Usage: ft "search term"
-#        ft "search term" <path>
-#        ft <path>
+# ------------------------------------------
+# NAME: ft
+# DESC: Fuzzy Text Search - Live grep using ripgrep and fzf
+# USAGE: ft "query" [path]
+# TAGS: grep, search, find, text
+# ------------------------------------------
 ft() {
     # 1. Check for Ripgrep
     if ! command -v rg &> /dev/null; then
@@ -341,9 +198,12 @@ zle -N _ft_widget
 bindkey '^g' _ft_widget
 
 
-# ==========================================
-#  THE UNIVERSAL FINDER (ff) - Fixed
-# ==========================================
+# ------------------------------------------
+# NAME: ff
+# DESC: Universal Finder - Find files and directories
+# USAGE: ff
+# TAGS: find, file, directory
+# ------------------------------------------
 ff() {
     local source_cmd
     if command -v fd &> /dev/null; then
@@ -404,41 +264,79 @@ zle -N _ff_widget
 bindkey '^f' _ff_widget
 
 
-# ==========================================
-#  UTIL LAUNCHER (Local Productivity)
-# ==========================================
-# Usage: util
+# ------------------------------------------
+# NAME: util
+# DESC: Local Utilities Launcher - Menu for local tools
+# USAGE: util
+# TAGS: launcher, menu, tools
+# ------------------------------------------
 util() {
     # 1. DYNAMICALLY LOCATE THIS FILE
     local UTIL_LIB="${(%):-%x}"
     if [ -z "$UTIL_LIB" ]; then UTIL_LIB="${BASH_SOURCE[0]}"; fi
 
-    # 2. Define the menu
-    local tools=(
-        "ff:Universal Finder (Files/Dirs)"
-        "ft:Live Grep (Text Search)"
-        "proj:Project Sessionizer (Tmux)"
-        "fop:Fuzzy Open (Nvim)"
-        "fcd:Fuzzy CD (Navigation)"
-        "jqe:JSON Query Explorer"
-        "view:Smart Image Viewer"
-        "tkill:Tmux Session Killer"
-    )
+    # 2. Build Dynamic Menu
+    local tools=()
+    while IFS= read -r line; do tools+=("$line"); done < <(_tmt_scan "$UTIL_LIB")
 
     # 3. Run FZF with 'awk' Paragraph Preview
-    # Scans THIS file for the function comments
     local selected=$(printf "%s\n" "${tools[@]}" | column -t -s ":" | fzf \
         --height=50% \
         --layout=reverse \
         --border \
+        --exact \
+        --tiebreak=begin \
         --header="⚡ Tamatar Local Utilities" \
         --prompt="util > " \
-        --preview="awk -v func_name={1} 'BEGIN{RS=\"\"} \$0 ~ (\"(^|\\n)\" func_name \"\\\\(\\\\)\") {print}' $UTIL_LIB | bat -l bash --color=always --style=numbers" \
+        --delimiter="  +" \
+        --with-nth=1,2 \
+        --preview="awk -v func_name={1} '/^#|^[[:space:]]*$/ { buf = buf \$0 \"\\n\"; next } \$0 ~ \"^\" func_name \"\\\\(\\\\)\" { print buf \$0; in_func = 1; buf = \"\"; next } in_func { print \$0; if (\$0 ~ /^}/) exit } { buf = \"\" }' {3} | bat -l bash --color=always --style=numbers" \
         --preview-window="right:60%:wrap" \
         | awk '{print $1}')
 
-    # 4. Push to Buffer
+    # 4. Push to Buffer (ZSH specific)
     if [[ -n "$selected" ]]; then
         print -z "$selected "
     fi
+}
+
+# ------------------------------------------
+# NAME: jqe
+# DESC: JSON Explorer - Interactive fzf-based JSON viewer
+# USAGE: jqe <file> OR command | jqe
+# TAGS: json, explore, fzf, view
+# ------------------------------------------
+jqe() {
+  local INPUT_FILE=$(mktemp /tmp/jqe_XXXXXX.json)
+  
+  # Ensure cleanup happens on EXIT, INT (Ctrl+C), or TERM
+  trap 'rm -f "$INPUT_FILE"' EXIT INT TERM
+
+  # 1. Input Handling
+  if [ -f "$1" ]; then
+    cat "$1" > "$INPUT_FILE"
+  elif [ -t 0 ]; then
+    echo "Usage: jqe <file> OR command | jqe"
+    return 1
+  else
+    cat > "$INPUT_FILE"
+  fi
+
+  # 2. Validity Check
+  if ! jq empty "$INPUT_FILE" 2>/dev/null; then
+    echo "❌ Error: Invalid JSON."
+    return 1
+  fi
+
+  # 3. Explorer
+  local SELECTED_PATH=$(jq -r 'paths | map(if type=="number" then "["+tostring+"]" else "[\""+tostring+"\"]" end) | join("") | "." + .' "$INPUT_FILE" \
+    | fzf --height 60% --layout=reverse --border --header="JSON Explorer" --preview "jq -C {1} $INPUT_FILE")
+
+  # 4. Output
+  if [ -n "$SELECTED_PATH" ]; then
+    local VALUE=$(jq -r "$SELECTED_PATH" "$INPUT_FILE")
+    if command -v wl-copy &> /dev/null; then echo -n "$VALUE" | wl-copy; fi
+    echo "✅ Copied: $SELECTED_PATH"
+    echo "$VALUE"
+  fi
 }

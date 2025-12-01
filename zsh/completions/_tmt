@@ -1,0 +1,321 @@
+#compdef tmt
+
+# ==========================================
+#  TAMATAR OS COMPLETIONS (_tmt)
+# ==========================================
+# Comprehensive completion for the 'tmt' master wrapper.
+# Covers all subcommands, flags, and arguments for:
+# - Brain (AI)
+# - Cloud (OCI)
+# - Sky (Azure)
+# - Git (Intelligence)
+# - Local (Utilities)
+
+_tmt() {
+    local -a categories
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    # 1. Top-Level Categories
+    categories=(
+        "brain:AI & LLM Tools (Groq, Gemini)"
+        "cloud:Oracle Cloud Infrastructure (OCI)"
+        "sky:Azure Infrastructure (Sky)"
+        "git:Git Intelligence Layer"
+        "local:Local Utilities & System"
+    )
+
+    _arguments -C \
+        '1:category:->category' \
+        '2:command:->command' \
+        '*::args:->args'
+
+    case $state in
+        category)
+            _describe -t categories "Tamatar Category" categories
+            ;;
+        command)
+            case $line[1] in
+                brain) _tmt_brain_cmds ;;
+                cloud) _tmt_cloud_cmds ;;
+                sky)   _tmt_sky_cmds ;;
+                git)   _tmt_git_cmds ;;
+                local) _tmt_local_cmds ;;
+            esac
+            ;;
+        args)
+            case $line[1] in
+                brain) _tmt_brain_args "$line[2]" ;;
+                cloud) _tmt_cloud_args "$line[2]" ;;
+                sky)   _tmt_sky_args "$line[2]" ;;
+                git)   _tmt_git_args "$line[2]" ;;
+                local) _tmt_local_args "$line[2]" ;;
+            esac
+            ;;
+    esac
+}
+
+# ==========================================
+#  CATEGORY: BRAIN (AI)
+# ==========================================
+_tmt_brain_cmds() {
+    local -a cmds
+    cmds=(
+        "ai:AI Launcher"
+        "ask:General AI Query (Groq)"
+        "think:Deep Reasoning (Gemini)"
+        "digest:Summarize Text/File"
+        "agent:Autonomous Agent Mode"
+        "vision:Image Analysis"
+        "refactor:Clean & Optimize Code"
+        "morph:Convert Data Formats"
+        "audit:Security Config Scanner"
+        "why:Debug Errors & Stacktraces"
+        "summarize:Summarize Logs/Text"
+        "guru:Context-Aware Architect"
+        "research:Web Research"
+        "rx:Regex Generator"
+        "pick:JSON Picker"
+        "explain:Code Explainer"
+        "jsql:JSON to SQL"
+        "jask:Ask JSON"
+        "jqg:JQ Filter Generator"
+        "jqa:JQ Assistant"
+        "search:Web Search (Google)"
+        "rask:Ask with Memory"
+        "memory:Manage AI Memory"
+    )
+    _describe -t commands "Brain Tools" cmds
+}
+
+_tmt_brain_args() {
+    case $1 in
+        memory)
+            _arguments "1:subcommand:(add search ls clean init)" "*:args:_files"
+            ;;
+        vision)
+            _arguments "1:image_file:_files" "2:prompt"
+            ;;
+        digest|summarize|refactor|morph|audit|explain)
+            _arguments "1:file:_files"
+            ;;
+        *)
+            # Default to file completion or text
+            _files
+            ;;
+    esac
+}
+
+# ==========================================
+#  CATEGORY: CLOUD (OCI)
+# ==========================================
+_tmt_cloud_cmds() {
+    local -a cmds
+    cmds=(
+        "oi:OCI Launcher"
+        "basket:Private S3 Storage"
+        "site:Static Site Deployer"
+        "drop:Public File Share"
+        "buckets:Bucket Manager"
+        "jam:MySQL HeatWave"
+        "pantry:Autonomous DB"
+        "pantrysh:Pantry Shell"
+        "kv:Key-Value Store"
+        "stock:JSON Store"
+        "task:Task Manager"
+        "vault:Secret Manager"
+        "mark:Smart Bookmarks"
+        "clip:Cloud Clipboard"
+        "tempdb:Ephemeral Databases"
+        "post:Email Sender"
+        "daily:Habit Tracker"
+        "notes:Simple Notes"
+    )
+    _describe -t commands "Cloud Tools" cmds
+}
+
+_tmt_cloud_args() {
+    local cmd=$1
+    case $cmd in
+        basket)
+            _arguments "1:subcommand:(ls push pull rm link)" \
+                       "2:file:_files" \
+                       "3:duration:(1h 1d 1w)"
+            ;;
+        site)
+            _arguments "1:subcommand:(deploy ls rm)" \
+                       "2:directory:_files -/" \
+                       "3:project_name"
+            ;;
+        drop)
+            _arguments "1:subcommand:(ls rm)" \
+                       "2:file:_files"
+            ;;
+        buckets)
+            _arguments "1:subcommand:(ls mk rm cp sync nuke)" \
+                       "2:target" \
+                       "3:destination"
+            ;;
+        jam|pantry)
+            _arguments "1:database" "2:sql_query"
+            ;;
+        kv)
+            _arguments "1:subcommand:(set get rm ls)" \
+                       "2:key" \
+                       "3:value"
+            ;;
+        stock)
+            _arguments "1:subcommand:(set get ls rm)" \
+                       "2:key_path" \
+                       "3:value_or_file:_files"
+            ;;
+        task)
+            _arguments "1:subcommand:(add ls done clean)" \
+                       "2:content_or_id"
+            ;;
+        vault)
+            _arguments "1:subcommand:(add load env ls peek rm prune)" \
+                       "2:key" \
+                       "3:category"
+            ;;
+        mark)
+            _arguments "1:subcommand:(add ls rm init)" \
+                       "2:url_or_id"
+            ;;
+        clip)
+            _arguments "1:subcommand:(copy paste ls mem clean)" \
+                       "2:content"
+            ;;
+        tempdb)
+            _arguments "1:engine:(mysql pg ls drop clean)" \
+                       "--ttl:duration" \
+                       "--note:description" \
+                       "--name:db_name"
+            ;;
+        post)
+            _arguments "1:subject" "2:body" "3:to_email"
+            ;;
+        daily)
+            _arguments "1:subcommand:(add ls check do note up rm all)" \
+                       "2:arg2" "3:arg3" "4:arg4"
+            ;;
+        notes)
+            _arguments "1:subcommand:(up push backup down pull restore status check open index memorize)"
+            ;;
+        *)
+            _files
+            ;;
+    esac
+}
+
+# ==========================================
+#  CATEGORY: SKY (AZURE)
+# ==========================================
+_tmt_sky_cmds() {
+    local -a cmds
+    cmds=(
+        "sky:Azure Launcher"
+        "silo:PostgreSQL DB"
+        "hive:Cosmos DB (Mongo)"
+        "trunk:Azure Files Mount"
+        "ledger:SQL Server"
+        "rem:Remember Command"
+        "oops:Remember Error Fix"
+
+        "load-env:Index Project"
+        "say:Text-to-Speech"
+        "hey:Jarvis Voice Mode"
+    )
+    _describe -t commands "Sky Tools" cmds
+}
+
+_tmt_sky_args() {
+    case $1 in
+        silo)
+            _arguments "1:subcommand:(backup restore)" "2:database"
+            ;;
+        trunk)
+            _arguments "1:subcommand:(mount unmount ls)"
+            ;;
+        rem)
+            _arguments "1:description" "2:command"
+            ;;
+        oops)
+            _arguments "1:error_msg" "2:fix_command"
+            ;;
+
+            _arguments "1:pdf_file:_files -g '*.pdf'"
+            ;;
+        say|hey)
+            _arguments "1:text_or_command"
+            ;;
+        *)
+            _files
+            ;;
+    esac
+}
+
+# ==========================================
+#  CATEGORY: GIT
+# ==========================================
+_tmt_git_cmds() {
+    local -a cmds
+    cmds=(
+        "gcmt:Semantic Commit Writer"
+        "gmem:Git Memory Manager"
+        "gask:Chat with Repo"
+        "gwhy:Explain Commit"
+        "glog:Interactive Log"
+        "gdev:Deep Code Intelligence"
+    )
+    _describe -t commands "Git Tools" cmds
+}
+
+_tmt_git_args() {
+    case $1 in
+        gmem)
+            _arguments "1:subcommand:(index backfill ls status)" "2:limit"
+            ;;
+        gwhy)
+            _arguments "1:target:(HEAD pick)"
+            ;;
+        gdev|gask)
+            _arguments "1:question"
+            ;;
+        *)
+            _files
+            ;;
+    esac
+}
+
+# ==========================================
+#  CATEGORY: LOCAL
+# ==========================================
+_tmt_local_cmds() {
+    local -a cmds
+    cmds=(
+        "util:Local Launcher"
+        "fop:Fuzzy Open (nvim)"
+        "tkill:Fuzzy Kill Process"
+        "view:Fuzzy File Viewer"
+        "ft:File Tree (lsd)"
+        "ff:Find File"
+    )
+    _describe -t commands "Local Tools" cmds
+}
+
+_tmt_local_args() {
+    case $1 in
+        view)
+            _arguments "(-g --gui)"{-g,--gui}"[Force GUI viewer]" "1:file:_files"
+            ;;
+        ft)
+            _arguments "1:query" "2:path:_files -/"
+            ;;
+        *)
+            _files
+            ;;
+    esac
+}
+
+_tmt "$@"

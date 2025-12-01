@@ -1,6 +1,21 @@
 # ==========================================
 #  AZURE UTILITIES (The "azr" Layer)
 # ==========================================
+# A suite of Azure-powered CLI tools for Fedora.
+#
+# INFRASTRUCTURE:
+# 1. Silo (PostgreSQL): General purpose bulk storage.
+# 2. Hive (Cosmos DB): High-speed NoSQL document store.
+# 3. Trunk (Azure Files): 100GB Cloud Drive mount.
+# 4. Ledger (SQL Server): Serverless T-SQL database.
+#
+# AI & MEMORY:
+# 5. Recall: Semantic search and vector memory.
+# 6. Rem: Command history memory.
+# 7. Oops: Error resolution memory.
+# 8. Say: Text-to-Speech engine.
+# 9. Hey: Jarvis mode (Voice wrapper).
+# ==========================================
 
 
 # --- CONFIGURATION ---
@@ -22,10 +37,11 @@ _az_check() {
 }
 
 # ------------------------------------------
-# 1. SILO (PostgreSQL General Purpose)
+# NAME: silo
+# DESC: PostgreSQL - General purpose bulk storage
+# USAGE: silo [sql|backup|restore]
+# TAGS: db, postgres, sql, azure
 # ------------------------------------------
-# Your bulk storage database.
-# Usage: silo [sql_command]
 silo() {
     _az_check
     if [ -z "$SILO_PASS" ]; then source ~/.azure/.secrets.sh; fi
@@ -91,10 +107,11 @@ silo() {
 }
 
 # ------------------------------------------
-# 2. HIVE (Cosmos DB / MongoDB)
+# NAME: hive
+# DESC: Cosmos DB - NoSQL Document Store (Mongo API)
+# USAGE: hive [command]
+# TAGS: db, mongo, nosql, cosmos
 # ------------------------------------------
-# High-speed NoSQL Document Store
-# Usage: hive [command]
 hive() {
     _az_check
 
@@ -119,9 +136,11 @@ hive() {
 }
 
 # ------------------------------------------
-# 3. TRUNK (Azure Files / SMB Mount)
+# NAME: trunk
+# DESC: Azure Files - Mount 100GB Cloud Drive
+# USAGE: trunk [mount|unmount|ls]
+# TAGS: storage, mount, smb, azure
 # ------------------------------------------
-# Mounts 100GB Cloud Drive to ~/trunk
 trunk() {
     _az_check
     if [ -z "$TRUNK_KEY" ]; then source ~/.azure/.secrets.sh; fi
@@ -191,10 +210,11 @@ trunk() {
 }
 
 # ------------------------------------------
-# 4. LEDGER (Azure SQL Serverless)
+# NAME: ledger
+# DESC: SQL Server - Serverless T-SQL Database
+# USAGE: ledger [sql]
+# TAGS: db, sql, mssql, azure
 # ------------------------------------------
-# Microsoft SQL Server (T-SQL)
-# Usage: ledger [sql]
 ledger() {
     _az_check
 
@@ -231,101 +251,12 @@ ledger() {
     fi
 }
 
-# ==========================================
-#  RECALL (Semantic Search / Vector DB)
-# ==========================================
-# Usage: recall "how do i fix wifi?"
-#        recall add "Restart router to fix wifi" "manual.md"
-recall() {
-    local CMD="$1"
-    local ARG2="$2"
-    local ARG3="$3"
-    
-    export SILO_DB="memory"
-
-    if ! command -v _get_embedding &>/dev/null; then
-        [ -f ~/.dotfiles/zsh/ai_functions.zsh ] && source ~/.dotfiles/zsh/ai_functions.zsh
-    fi
-
-    case "$CMD" in
-        clean|wipe)
-            echo -n "⚠️  DANGER: Wipe ALL memory? [y/N] "
-            read -r confirm
-            if [[ "$confirm" == "y" ]]; then
-                silo "TRUNCATE TABLE items;"
-                echo "🧹 Memory wiped clean."
-            else
-                echo "❌ Aborted."
-            fi
-            ;;
-
-        ls|log)
-            echo "🔍 Recent Memories:"
-            silo "SELECT id, left(content, 60) as preview, source FROM items ORDER BY id DESC LIMIT 10;"
-            ;;
-
-        add)
-            if [[ -z "$ARG2" ]]; then echo "Usage: recall add <text> [source]"; return 1; fi
-            local INPUT="$ARG2"
-            local SOURCE="${ARG3:-manual}"
-            
-            echo -n "🧠 Embedding..."
-            local VECTOR=$(_get_embedding "$INPUT")
-            
-            if [[ -z "$VECTOR" ]]; then echo "❌ Failed to generate embedding."; return 1; fi
-            
-            echo -n " 💾 Storing..."
-            
-            local B64_CONTENT=$(echo -n "$INPUT" | base64 | tr -d '\n')
-            local B64_SOURCE=$(echo -n "$SOURCE" | base64 | tr -d '\n')
-            
-            # Use Postgres 'convert_from(decode(..., 'base64'), 'UTF8')'
-            local SQL="INSERT INTO items (content, source, embedding) 
-                       VALUES (
-                           convert_from(decode('$B64_CONTENT', 'base64'), 'UTF8'), 
-                           convert_from(decode('$B64_SOURCE', 'base64'), 'UTF8'), 
-                           '$VECTOR'
-                       );"
-            
-            if ERROR=$(silo "$SQL" 2>&1); then
-                echo " ✅ Memorized."
-            else
-                echo " ❌ Database Error:"
-                echo "$ERROR"
-                return 1
-            fi
-            ;;
-
-        *)
-            if [[ -z "$CMD" ]]; then echo "Usage: recall <query> | add | ls | clean"; return 1; fi
-            
-            echo -n "🤔 Thinking..." >&2
-            local QUERY_VECTOR=$(_get_embedding "$CMD")
-            
-            if [[ -z "$QUERY_VECTOR" ]]; then echo "❌ API Error"; return 1; fi
-            
-            echo -e "\r🔍 \033[1;33mRecall Results:\033[0m" >&2
-
-            local SQL="SELECT source, content, 1 - (embedding <=> '$QUERY_VECTOR') AS similarity 
-                       FROM items 
-                       ORDER BY embedding <=> '$QUERY_VECTOR' 
-                       LIMIT 5;"
-            
-            silo "$SQL" | \
-            grep -v "rows)" | grep -v "^--" | grep -v "^source" | \
-            awk -F '|' '{ 
-                score = $3 * 100;
-                if (score > 30) printf "\n👉 \033[1;36m%s\033[0m (Match: %.0f%%)\n   %s\n", $1, score, $2 
-            }'
-            ;;
-    esac
-}
-
-# ==========================================
-# REM (Remember Command)
-# ==========================================
-# Usage: rem "description" "command"
-#        rem "description" (Saves last command)
+# ------------------------------------------
+# NAME: rem
+# DESC: Command Memory - Save command to memory
+# USAGE: rem "description" [command]
+# TAGS: memory, command, save, history
+# ------------------------------------------
 rem() {
     local DESC="$1"
     local CMD="$2"
@@ -338,12 +269,15 @@ rem() {
     fi
 
     echo "💾 Remembering: $CMD"
-    recall add "Command: $CMD. Description: $DESC" "shell_history"
+    memory add "Command: $CMD. Description: $DESC" "shell_history"
 }
 
-# ==========================================
-# OOPS (Error & Solution Memory)
-# ==========================================
+# ------------------------------------------
+# NAME: oops
+# DESC: Error Memory - Save error fix to memory
+# USAGE: oops "error" "fix"
+# TAGS: memory, error, fix, debug
+# ------------------------------------------
 oops() {
     local ERROR="$1"
     local FIX="$2"
@@ -351,31 +285,17 @@ oops() {
 
     echo "💊 Remembering Fix..."
     # Format: [SOLVED] Error... -> Solution...
-    recall add "[SOLVED] Issue: $ERROR. Fix: $FIX" "Troubleshooting"
+    memory add "[SOLVED] Issue: $ERROR. Fix: $FIX" "Troubleshooting"
 }
 
-# ==========================================
-# READ-PDF (Ingest PDF to Brain)
-# ==========================================
-read-pdf() {
-    local FILE="$1"
-    if [ ! -f "$FILE" ]; then echo "Usage: read-pdf <file.pdf>"; return 1; fi
 
-    echo "📖 Reading '$FILE'..."
-    # Convert PDF to text
-    local TEXT=$(pdftotext "$FILE" -)
 
-    # Chunking: Gemini can take ~1MB text, but let's take the first 4000 chars
-    # to capture the abstract/summary for efficient embedding.
-    local CHUNK=$(echo "$TEXT" | head -c 4000)
-
-    echo "🧠 Memorizing..."
-    recall add "Document: $(basename "$FILE"). Content: $CHUNK" "Library"
-}
-
-# ==========================================
-# LOAD-ENV (Project Context)
-# ==========================================
+# ------------------------------------------
+# NAME: load-env
+# DESC: Project Context - Index .memory file
+# USAGE: load-env
+# TAGS: project, context, memory, index
+# ------------------------------------------
 load-env() {
     if [ ! -f .memory ]; then 
         echo "❌ No .memory file found in current directory."
@@ -390,35 +310,15 @@ load-env() {
     
     echo "🏗️  Indexing Project Context: $PROJ..."
     
-    # 2. Get Embedding (AI)
-    echo -n "🧠 Embedding..."
-    local VECTOR=$(_get_embedding "$FULL_TEXT")
-    
-    if [[ -z "$VECTOR" ]]; then echo "❌ Failed to generate embedding."; return 1; fi
-    
-    # 3. Prepare Content for SQL (Base64 Safe Transport)
-    # We encode the text to avoid SQL injection/syntax errors with quotes
-    local B64_CONTENT=$(echo -n "$FULL_TEXT" | base64 | tr -d '\n')
-    local SAFE_SOURCE="Dev: $PROJ"
-    
-    echo -n " 💾 Storing..."
-    
-    # We use Postgres 'convert_from(decode(..., 'base64'), 'UTF8')' to handle the insert
-    if ERROR=$(silo "INSERT INTO items (content, source, embedding) 
-                     VALUES (convert_from(decode('$B64_CONTENT', 'base64'), 'UTF8'), '$SAFE_SOURCE', '$VECTOR');" 2>&1); then
-        echo " ✅ Memorized."
-    else
-        echo " ❌ Database Error:"
-        echo "$ERROR"
-        return 1
-    fi
+    memory add "$FULL_TEXT" "Dev: $PROJ"
 }
 
 # ------------------------------------------
-# 4. SAY (AI Text-to-Speech)
+# NAME: say
+# DESC: Text-to-Speech - AI Voice Output
+# USAGE: say "text"
+# TAGS: tts, voice, speech, ai
 # ------------------------------------------
-# Usage: say "Hello World"
-#        echo "Done" | say
 say() {
     _az_check
     if [ -z "$SAY_KEY" ]; then source ~/.azure/.secrets.sh; fi
@@ -457,13 +357,11 @@ say() {
 }
 
 # ------------------------------------------
-# jarvis mode (universal voice wrapper)
+# NAME: hey
+# DESC: Jarvis Mode - Universal Voice Wrapper
+# USAGE: hey [command|question]
+# TAGS: voice, jarvis, ai, chat
 # ------------------------------------------
-# usage:
-#   1. command: hey research "azure"      (runs cmd, shows output, speaks it)
-#   2. pipe:    cat error.log | hey why   (passes input to cmd, speaks result)
-#   3. chat:    hey "who are you?"        (asks ai, speaks result)
-#   4. echo:    echo "done" | hey         (just speaks the input)
 hey() {
     # 0. intercept "stop"
     if [[ "$1" == "stop" || "$1" == "shutup" || "$1" == "quiet" ]]; then
@@ -520,25 +418,29 @@ hey() {
 }
 
 # ------------------------------------------
-# sky launcher
+# NAME: sky
+# DESC: Sky Launcher - Master menu for Azure tools
+# USAGE: sky
+# TAGS: launcher, menu, azure, tools
 # ------------------------------------------
 sky() {
-    local azr_lib="${(%):-%x}"
-    if [ -z "$azr_lib" ]; then azr_lib="${bash_source[0]}"; fi
+    local AZR_LIB="${(%):-%x}"
+    if [ -z "$AZR_LIB" ]; then AZR_LIB="${BASH_SOURCE[0]}"; fi
 
-    local tools=(
-        "silo:General DB (PostgreSQL)"
-        "hive:NoSQL Store (Cosmos DB)"
-        "trunk:100GB Cloud Drive (Mount)"
-        "ledger:SQL Server (T-SQL)"
-        "say:AI Voice (Text-to-Speech)"
-        "hey:Jarvis Mode (Ask + Voice)"
-    )
+    local tools=()
+    while IFS= read -r line; do tools+=("$line"); done < <(_tmt_scan "$AZR_LIB")
 
     local selected=$(printf "%s\n" "${tools[@]}" | column -t -s ":" | fzf \
-            --height=50% --layout=reverse --border --header="🔷 Sky Cloud Controller" \
+            --height=50% \
+            --layout=reverse \
+            --border \
+            --exact \
+            --tiebreak=begin \
+            --header="🔷 Sky Cloud Controller" \
             --prompt="sky > " \
-            --preview="awk -v func_name={1} 'BEGIN{RS=\"\"} \$0 ~ (\"(^|\\n)\" func_name \"\\\\(\\\\)\") {print}' $AZR_LIB | bat -l bash --color=always --style=numbers" \
+            --delimiter="  +" \
+            --with-nth=1,2 \
+            --preview="awk -v func_name={1} '/^#|^[[:space:]]*$/ { buf = buf \$0 \"\\n\"; next } \$0 ~ \"^\" func_name \"\\\\(\\\\)\" { print buf \$0; in_func = 1; buf = \"\"; next } in_func { print \$0; if (\$0 ~ /^}/) exit } { buf = \"\" }' {3} | bat -l bash --color=always --style=numbers" \
             --preview-window="right:60%:wrap" \
         | awk '{print $1}')
 
