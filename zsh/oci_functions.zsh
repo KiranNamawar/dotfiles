@@ -1487,6 +1487,133 @@ except Exception as e:
 }
 
 # ==========================================
+# 14. DAILY (Habit & Routine Tracker)
+# ==========================================
+# Purpose: Track recurring habits with flexible schedules.
+# Usage:   daily add "Name" "Category" [mon/tue/daily]
+#          daily ls (Shows only today's tasks)
+daily() {
+    local CMD=$1
+    local ARG2=$2
+    local ARG3=$3
+    local ARG4=$4
+
+    # 0. INIT & MIGRATION
+    _daily_init() {
+        # 1. Ensure Table Exists
+        jam -e "CREATE TABLE IF NOT EXISTS utils.habits (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            category VARCHAR(50) DEFAULT 'general',
+            status_text VARCHAR(255) DEFAULT '',
+            last_done DATE,
+            streak INT DEFAULT 0,
+            schedule VARCHAR(20) DEFAULT 'daily',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );" >/dev/null 2>&1
+
+        # 2. Migration Check (Add 'schedule' column if missing from old version)
+        local CHECK=$(jam -N -B -e "SHOW COLUMNS FROM utils.habits LIKE 'schedule';" 2>/dev/null)
+        if [ -z "$CHECK" ]; then
+            # Only run this if the table exists but the column is missing
+            jam -e "ALTER TABLE utils.habits ADD COLUMN schedule VARCHAR(20) DEFAULT 'daily';" 2>/dev/null
+        fi
+    }
+
+    case "$CMD" in
+        add)
+            _daily_init
+            if [ -z "$ARG2" ]; then 
+                echo "Usage: daily add <name> [category] [schedule]"
+                echo "Schedule: daily, mon, tue, wed, thu, fri, sat, sun, weekday, weekend"
+                return 1
+            fi
+            local CAT="${ARG3:-general}"
+            local SCH="${ARG4:-daily}"
+            local SAFE_NAME="${ARG2//\'/\'\'}"
+            
+            jam -e "INSERT INTO utils.habits (name, category, schedule) VALUES ('$SAFE_NAME', '$CAT', '$SCH');"
+            echo "✅ Added '$ARG2' ($SCH)."
+            ;;
+
+        ls)
+            _daily_init
+            local TODAY=$(date +%a | tr '[:upper:]' '[:lower:]')
+            
+            # SQL: Daily OR Today OR Weekday/Weekend Logic
+            local WHERE_CLAUSE="
+                (schedule = 'daily') OR 
+                (schedule = '$TODAY') OR
+                (schedule = 'weekday' AND WEEKDAY(CURDATE()) < 5) OR
+                (schedule = 'weekend' AND WEEKDAY(CURDATE()) >= 5)
+            "
+
+            local SQL="SELECT id, CASE WHEN last_done = CURDATE() THEN '🟢' ELSE '🔴' END, name, streak, status_text, category, schedule FROM utils.habits WHERE $WHERE_CLAUSE ORDER BY (last_done = CURDATE()), category, id;"
+            
+            echo -e "📅 \033[1;33mTODAY'S ROUTINE ($TODAY)\033[0m"
+            echo "---------------------------------------------------"
+            
+            jam -N -B -e "$SQL" | awk -F '\t' '{
+                streak_icon = "🔥"
+                if ($4 < 3) streak_icon = "streak"
+                sched_label = ""
+                if ($7 != "daily") sched_label = "[" $7 "]"
+
+                if ($2 == "🟢") {
+                    printf "\033[1;30m%2s %s %-20s ( %s %s ) %s\033[0m\n", $1, $2, $3, $4, streak_icon, $5
+                } else {
+                    printf "\033[1;37m%2s %s \033[1;36m%-20s\033[0m \033[0;33m( %s %s )\033[0m \033[0;35m%s %s\033[0m\n", $1, $2, $3, $4, streak_icon, $6, sched_label
+                }
+            }'
+            ;;
+
+        check|do)
+            local ID=$ARG2
+            local NOTE=$ARG3
+            
+            if [ -z "$ID" ]; then
+                local TODAY=$(date +%a | tr '[:upper:]' '[:lower:]')
+                local WHERE="((schedule = 'daily') OR (schedule = '$TODAY') OR (schedule = 'weekday' AND WEEKDAY(CURDATE()) < 5)) AND (last_done IS NULL OR last_done != CURDATE())"
+                ID=$(jam -N -B -e "SELECT id, name FROM utils.habits WHERE $WHERE;" | fzf --height 40% --layout=reverse --header="✅ Complete Task" | awk '{print $1}')
+            fi
+            [ -z "$ID" ] && return
+
+            local UPDATE_SQL="UPDATE utils.habits SET 
+                streak = CASE 
+                    WHEN last_done = CURDATE() THEN streak
+                    WHEN schedule = 'daily' AND last_done = DATE_SUB(CURDATE(), INTERVAL 1 DAY) THEN streak + 1
+                    WHEN schedule IN ('mon','tue','wed','thu','fri','sat','sun') AND last_done = DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN streak + 1
+                    ELSE 1 
+                END,
+                last_done = CURDATE(),
+                status_text = IF('$NOTE' != '', '$NOTE', status_text)
+                WHERE id = $ID;"
+
+            jam -e "$UPDATE_SQL"
+            echo "🎉 Habit #$ID Checked!"
+            ;;
+
+        note|up)
+            if [ -z "$ARG2" ] || [ -z "$ARG3" ]; then echo "Usage: daily note <id> \"Note\""; return 1; fi
+            jam -e "UPDATE utils.habits SET status_text = '${ARG3//\'/\'\'}' WHERE id=$ARG2;"
+            echo "📝 Updated."
+            ;;
+
+        rm)
+            if [ -z "$ARG2" ]; then echo "Usage: daily rm <id>"; return 1; fi
+            jam -e "DELETE FROM utils.habits WHERE id=$ARG2;"
+            echo "🗑️  Deleted."
+            ;;
+            
+        all)
+             jam -N -B -e "SELECT id, name, schedule, last_done FROM utils.habits;" | column -t
+             ;;
+
+        *) echo "Usage: daily {ls | add | check | note | rm | all}" ;;
+    esac
+}
+
+# ==========================================
 #  OCI LAUNCHER (The Master Menu)
 # ==========================================
 # Usage: oi

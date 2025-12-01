@@ -151,12 +151,216 @@ _get_embedding() {
     echo "$vector"
 }
 
-# --- PUBLIC FUNCTIONS ---
+# ------------------------------------------
+# OpenRouter API Caller (File-Based Reliability)
+# ------------------------------------------
+_call_openrouter() {
+    local sys_prompt="$1"
+    local user_input="$2"
+    local model="$3"
+    
+    local api_key=$(_get_key "OPENROUTER_API_KEY")
+    if [ -z "$api_key" ]; then echo "❌ Error: OPENROUTER_API_KEY missing."; return 1; fi
 
-# 1. ASK
-# Purpose: General purpose Q&A for Linux/Coding.
-# Model: Llama 3.1 8B (Fastest response)
-# Usage: ask "how do I unzip tar.gz"
+    echo -n "🧠 Deep Thinking ($model)..." >&2
+
+    # Use temp files to prevent pipe buffer issues with large responses
+    local req_file=$(mktemp /tmp/tmt_req_XXXX.json)
+    local res_file=$(mktemp /tmp/tmt_res_XXXX.json)
+
+    jq -n \
+        --arg sys "$sys_prompt" \
+        --arg model "$model" \
+        --arg content "$user_input" \
+        '{
+           model: $model,
+           messages: [
+             {role: "system", content: $sys},
+             {role: "user", content: $content}
+           ]
+         }' > "$req_file"
+
+    # Capture HTTP code to detect server errors
+    # -o writes output to file, preventing stdout leakage
+    local http_code=$(curl -s -w "%{http_code}" -o "$res_file" -X POST "https://openrouter.ai/api/v1/chat/completions" \
+        -H "Authorization: Bearer $api_key" \
+        -H "Content-Type: application/json" \
+        -H "HTTP-Referer: https://tamatar.dev" \
+        -H "X-Title: Tamatar CLI" \
+        -d "@$req_file")
+
+    rm "$req_file"
+
+    if [[ "$http_code" -ne 200 ]]; then
+        echo -e "\n❌ API Error ($http_code):" >&2
+        cat "$res_file" >&2
+        rm "$res_file"
+        return 1
+    fi
+
+    # Python Parser for safety
+    local answer=$(python3 -c "
+import sys, json
+try:
+    with open('$res_file', 'r') as f:
+        data = json.load(f)
+    if 'error' in data:
+        print('API_ERROR: ' + str(data['error']))
+    else:
+        print(data['choices'][0]['message']['content'])
+except Exception:
+    print('JSON_PARSE_ERROR')
+")
+    
+    rm "$res_file"
+
+    if [[ "$answer" == "JSON_PARSE_ERROR" ]]; then
+        echo -e "\n❌ Failed to parse JSON response." >&2
+        return 1
+    elif [[ "$answer" == API_ERROR* ]]; then
+        echo -e "\n❌ $answer" >&2
+        return 1
+    fi
+
+    echo "$answer"
+}
+
+# ==========================================
+# 21. MEMORY (AstraDB Vector Client)
+# ==========================================
+# Purpose: Massive long-term AI memory (80GB Free).
+# Usage:   memory                 (Interactive Shell)
+#          memory add "text"      (Save)
+#          memory search "query"  (Search)
+memory() {
+    # 1. Load Secrets
+    local API=$(_get_key "ASTRA_API_ENDPOINT")
+    local TOKEN=$(_get_key "ASTRA_DB_TOKEN")
+    
+    if [[ -z "$API" || -z "$TOKEN" ]]; then
+        echo "❌ Error: Astra credentials missing in Vault."
+        return 1
+    fi
+
+    # Helper: API Call
+    _astra_req() {
+        local endpoint="$1"
+        local payload="$2"
+        curl -s -X POST "$API/api/json/v1/default_keyspace/$endpoint" \
+            -H "Token: $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$payload"
+    }
+
+    # --- INTERACTIVE MODE ---
+    if [[ -z "$1" ]]; then
+        echo "🧠 Tamatar Memory Console (AstraDB)"
+        echo "   Type 'help' for commands, 'exit' to quit."
+        
+        local line
+        while vared -p "%F{cyan}memory>%f " -c line; do
+            if [[ "$line" == "exit" || "$line" == "quit" ]]; then break; fi
+            if [[ -n "$line" ]]; then 
+                # Use 'eval' to properly split quoted strings in the line
+                eval "memory $line"
+            fi
+            line=""
+        done
+        echo "👋 Disconnected."
+        return
+    fi
+
+    local CMD="$1"
+    local ARG2="$2"
+    local ARG3="$3"
+
+    case "$CMD" in
+        init)
+            echo "⚙️  Initializing architecture..."
+            echo "📚 Creating 'library'..."
+            _astra_req "" '{"createCollection": {"name": "library", "options": {"vector": {"dimension": 768, "metric": "cosine"}}}}' | jq -r '.status // .errors'
+            echo "🌊 Creating 'stream'..."
+            _astra_req "" '{"createCollection": {"name": "stream", "options": {"vector": {"dimension": 768, "metric": "cosine"}}}}' | jq -r '.status // .errors'
+            echo "✅ Done."
+            ;;
+
+        add|save)
+            if [ -z "$ARG2" ]; then echo "Usage: add <text> [source]"; return 1; fi
+            local CONTENT="$ARG2"
+            local SOURCE="${ARG3:-manual}"
+            
+            echo -n "🧠 Embedding..."
+            local VECTOR=$(_get_embedding "$CONTENT")
+            if [[ -z "$VECTOR" ]]; then echo "❌ Embedding failed."; return 1; fi
+            
+            echo -n " 💾 Storing..."
+            local JSON=$(jq -n \
+                --arg txt "$CONTENT" \
+                --arg src "$SOURCE" \
+                --argjson vec "$VECTOR" \
+                --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{
+                   insertOne: {
+                     document: {
+                       content: $txt, 
+                       "$vector": $vec, 
+                       metadata: { source: $src },
+                       created_at: $ts
+                     }
+                   }
+                 }')
+            
+            local OUT=$(_astra_req "library" "$JSON")
+            if echo "$OUT" | grep -q "insertedIds"; then echo " ✅ Saved."; else echo " ❌ Failed: $OUT"; fi
+            ;;
+
+        ask|search|recall)
+            if [ -z "$ARG2" ]; then echo "Usage: search <query>"; return 1; fi
+            
+            echo -n "🤔 Thinking..." >&2
+            local Q_VEC=$(_get_embedding "$ARG2")
+            
+            echo -e "\r🔍 \033[1;33mResults:\033[0m" >&2
+            
+            local JSON=$(jq -n \
+                --argjson vec "$Q_VEC" \
+                '{"find": {"sort": {"$vector": $vec}, "options": {"limit": 5, "includeSimilarity": true}, "projection": {"content": 1, "metadata": 1}}}')
+            
+            local RESPONSE=$(_astra_req "library" "$JSON")
+            
+            if echo "$RESPONSE" | grep -q "errors"; then
+                echo "❌ API Error:"
+                echo "$RESPONSE" | jq .
+                return 1
+            fi
+            
+            local COUNT=$(echo "$RESPONSE" | jq -r '.data.documents | length' 2>/dev/null)
+            
+            if [[ "$COUNT" == "0" || -z "$COUNT" || "$COUNT" == "null" ]]; then
+                 echo "📭 No memories found."
+                 # Debug: echo "$RESPONSE"
+            else
+                 echo "$RESPONSE" | jq -r '.data.documents[] | "\n👉 Match: \(.["$similarity"] | . * 100 | floor)%\n   Source: \(.metadata.source)\n   \(.content)"'
+            fi
+            ;;
+            
+        help)
+            echo "  add <text> [source]   :: Memorize a fact"
+            echo "  search <query>        :: Semantic search"
+            echo "  init                  :: Setup database"
+            echo "  exit                  :: Close console"
+            ;;
+
+        *) echo "Usage: memory {init | add | search}";;
+    esac
+}
+
+# --- public functions ---
+
+# 1. ask
+# purpose: general purpose q&a for linux/coding.
+# model: llama 3.1 8b (fastest response)
+# usage: ask "how do i unzip tar.gz"
 #        echo "error text" | ask "explain this"
 ask() {
     local sys_prompt="You are a Linux CLI expert. Provide concise, accurate answers. Output Markdown."
@@ -174,6 +378,125 @@ ask() {
 
     local result=$(_call_groq "$sys_prompt" "$user_prompt" "llama-3.1-8b-instant")
     _render_output "$result"
+}
+
+# ------------------------------------------
+# 1. THINK (Reasoning Engine)
+# ------------------------------------------
+# Purpose: Deep reasoning for complex logic/math.
+# Usage:   think "solve the logic puzzle"
+think() {
+    local input="$*"
+    if [ -z "$input" ]; then echo "Usage: think <complex_problem>"; return 1; fi
+    
+    # TNG DeepSeek Chimera (671B MoE)
+    local model="tngtech/deepseek-r1t2-chimera:free"
+    
+    local sys="You are a Deep Reasoning Engine. 
+    Analyze the user's request step-by-step. 
+    Output your reasoning process (if applicable) followed by the final solution."
+    
+    local result=$(_call_openrouter "$sys" "$input" "$model")
+    _render_output "$result"
+}
+
+# ------------------------------------------
+# 2. DIGEST (Massive Context Analyzer)
+# ------------------------------------------
+# Purpose: Analyze large files/logs using Grok 4.1 (2M context).
+# Usage:   cat huge.log | digest "Find errors"
+digest() {
+    local PROMPT="$1"
+    local FILE="$2"
+    local CONTENT=""
+
+    if [ ! -t 0 ]; then
+        CONTENT=$(cat)
+    elif [ -f "$FILE" ]; then
+        CONTENT=$(cat "$FILE")
+    else
+        echo "Usage: cat <data> | digest <instruction>"
+        echo "       digest <instruction> <filename>"
+        return 1
+    fi
+
+    if [ -z "$PROMPT" ]; then echo "❌ Error: Missing instruction."; return 1; fi
+
+    echo -n "🦖 Grokking massive context..." >&2
+    local model="x-ai/grok-4.1-fast:free"
+    local sys="You are a Data Analyst with a massive context window."
+    
+    local result=$(_call_openrouter "$sys" "Instruction: $PROMPT\n\nData:\n$CONTENT" "$model")
+    _render_output "$result"
+}
+
+# ------------------------------------------
+# 3. AGENT (Software Engineer)
+# ------------------------------------------
+# Purpose: Write code/files using Kwaipilot KAT-Coder (256k Context).
+# Usage:   agent "Create a Python script" > script.py
+agent() {
+    local input="$*"
+    local context=""
+    
+    if [ ! -t 0 ]; then
+        context="[[ CODE CONTEXT ]]\n$(cat)\n\n"
+    fi
+    
+    if [ -z "$input" ]; then echo "Usage: agent <instruction>"; return 1; fi
+    
+    local model="kwaipilot/kat-coder-pro:free"
+    local sys="You are an Elite Software Engineer. 
+    Task: Write high-quality, production-ready code based on the user's instruction.
+    Rules: Output ONLY the code. No markdown backticks."
+    
+    local result=$(_call_openrouter "$sys" "$context$input" "$model")
+    echo "$result" | sed 's/^```[a-z]*//g' | sed 's/^```//g'
+}
+
+# 9. VISION
+# Purpose: Analyze images/screenshots.
+# Model: Gemini 2.5 Flash (Multimodal)
+# Usage: vision screenshot.png "What is the error here?"
+vision() {
+    local api_key=$(_get_key "GEMINI_API_KEY" "GEMINI_API_KEY")
+    if [ -z "$api_key" ]; then echo "❌ Error: GEMINI_API_KEY missing."; return 1; fi
+
+    local file_path="$1"
+    local user_prompt="${2:-Analyze this file in detail.}"
+    
+    if [ -z "$file_path" ]; then echo "Usage: vision <file> [prompt]"; return 1; fi
+    if [ ! -f "$file_path" ]; then echo "❌ File not found."; return 1; fi
+
+    echo "👀 Analyzing..." >&2
+    local mime_type=$(file --mime-type -b "$file_path")
+    
+    # 1. Create a temporary file for the JSON payload
+    local payload_file=$(mktemp /tmp/gemini_payload_XXXXXX.json)
+
+    # 2. Construct JSON Streamingly (Bypasses ARG_MAX limit)
+    # We pipe base64 -> jq (as raw input) -> file
+    # The '.' in jq represents the incoming base64 string
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        base64 -i "$file_path"
+    else
+        base64 -w0 "$file_path"
+    fi | jq -R --arg text "$user_prompt" --arg mime "$mime_type" \
+        '{ contents: [{ parts: [{text: $text}, {inline_data: {mime_type: $mime, data: .}}] }] }' \
+        > "$payload_file"
+
+    # 3. Send Request using File Reference (@file)
+    local response=$(curl -s -X POST \
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$api_key" \
+        -H "Content-Type: application/json" \
+        -d "@$payload_file")
+
+    # 4. Cleanup
+    rm "$payload_file"
+
+    # 5. Output
+    local answer=$(printf '%s' "$response" | jq -r '.candidates[0].content.parts[0].text')
+    _render_output "$answer"
 }
 
 # 2. REFACTOR
@@ -243,53 +566,6 @@ summarize() {
     _render_output "$result"
 }
 
-# # 7. GCMT (Git Commit)
-# # Purpose: Writes semantic commit messages based on diffs.
-# # Model: Gemini 2.5 Flash (Massive Context for large diffs)
-# # Usage: gcmt (inside git repo)
-# gcmt() {
-#     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then echo "❌ Not a git repo."; return 1; fi
-#     if git diff --cached --quiet; then echo "⚠️  No staged changes."; return 1; fi
-#
-#     local branch=$(git branch --show-current)
-#     local repo_root=$(git rev-parse --show-toplevel)
-#     local repo_name=$(basename "$repo_root")
-#     local diff_content=$(git diff --cached --no-color --no-ext-diff | head -c 100000)
-#     local sys="You are a Semantic Git Commit Writer. 
-#     Rules:
-#     1. First Line: <type>(<scope>): <subject> (Max 50 chars, Imperative mood).
-#     2. Body: Optional. Only add if changes are complex.
-#     3. Body Limit: Max 3 bullet points. Be extremely concise.
-#     4. Output: ONLY the raw commit message string."
-#
-#     local user_prompt="Current Branch: $branch\n\nCode Changes:\n$diff_content"
-#
-#     local msg=$(_call_gemini "$sys" "$user_prompt")
-#     msg=$(echo "$msg" | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
-#
-#     if [ -z "$msg" ]; then return 1; fi
-#
-#     printf "\r\033[K" >&2 
-#     echo -e "\033[1;32m$msg\033[0m"
-#     echo -n "🚀 Commit? [y/n/e]: "
-#     read -r choice
-#     case "$choice" in
-#         y|Y) 
-#           if git commit -m "$msg"; then
-#                 # --- INTEGRATION: Recall ---
-#                 if command -v recall &>/dev/null; then
-#                     # Content: [Project] Message (Branch)
-#                     # Source: Git: Project
-#                     local memory="[$repo_name] $msg (Branch: $branch)"
-#                     ( recall add "$memory" "Git: $repo_name" >/dev/null 2>&1 ) &|
-#                     echo "🧠 Commit memorized."
-#                 fi
-#             fi
-#             ;;
-#         e|E) git commit -m "$msg" -e ;;
-#         *) echo "❌ Aborted." ;;
-#     esac
-# }
 
 # 8. GURU
 # Purpose: Context-aware project architect. Knows your file structure.
@@ -354,50 +630,6 @@ If something is unclear, you MAY use Google Search as a secondary source."
     _render_output "$result"
 }
 
-# 9. VISION
-# Purpose: Analyze images/screenshots.
-# Model: Gemini 2.5 Flash (Multimodal)
-# Usage: vision screenshot.png "What is the error here?"
-vision() {
-    local api_key=$(_get_key "GEMINI_API_KEY" "GEMINI_API_KEY")
-    if [ -z "$api_key" ]; then echo "❌ Error: GEMINI_API_KEY missing."; return 1; fi
-
-    local file_path="$1"
-    local user_prompt="${2:-Analyze this file in detail.}"
-    
-    if [ -z "$file_path" ]; then echo "Usage: vision <file> [prompt]"; return 1; fi
-    if [ ! -f "$file_path" ]; then echo "❌ File not found."; return 1; fi
-
-    echo "👀 Analyzing..." >&2
-    local mime_type=$(file --mime-type -b "$file_path")
-    
-    # 1. Create a temporary file for the JSON payload
-    local payload_file=$(mktemp /tmp/gemini_payload_XXXXXX.json)
-
-    # 2. Construct JSON Streamingly (Bypasses ARG_MAX limit)
-    # We pipe base64 -> jq (as raw input) -> file
-    # The '.' in jq represents the incoming base64 string
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        base64 -i "$file_path"
-    else
-        base64 -w0 "$file_path"
-    fi | jq -R --arg text "$user_prompt" --arg mime "$mime_type" \
-        '{ contents: [{ parts: [{text: $text}, {inline_data: {mime_type: $mime, data: .}}] }] }' \
-        > "$payload_file"
-
-    # 3. Send Request using File Reference (@file)
-    local response=$(curl -s -X POST \
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$api_key" \
-        -H "Content-Type: application/json" \
-        -d "@$payload_file")
-
-    # 4. Cleanup
-    rm "$payload_file"
-
-    # 5. Output
-    local answer=$(printf '%s' "$response" | jq -r '.candidates[0].content.parts[0].text')
-    _render_output "$answer"
-}
 
 # 10. RESEARCH
 # Purpose: Search the live web for current info.
@@ -754,6 +986,7 @@ ai() {
         "jqg:Generate JQ Filter (Groq 70B)"
         "jqa:Generate & Apply JQ Filter"
         "search:AI File Finder (Groq 70B)"
+        "think:Deep Reasoning (DeepSeek)"
     )
 
     # 3. Run FZF with File-Based Preview

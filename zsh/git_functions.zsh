@@ -104,7 +104,6 @@ Branch: ${branch}
 Diff (staged only):
 ${diff_content}"
 
-    echo "♊ Gemini is reasoning..." >&2
     msg=$(_call_gemini "$sys" "$user_prompt")
     msg=$(echo "$msg" | sed 's/^```.*//g' | sed 's/```$//g' | awk '{$1=$1};1')
 
