@@ -38,7 +38,7 @@ ZSH_TMUX_AUTOCONNECT=true
 ZSH_TMUX_DEFAULT_SESSION_NAME="main"
 
 # --- Plugins ---
-plugins=(git zsh-autosuggestions zsh-syntax-highlighting fzf fzf-tab tmux)
+plugins=(git tmux fzf fzf-tab zsh-autosuggestions zsh-syntax-highlighting)
 
 source $ZSH/oh-my-zsh.sh
 

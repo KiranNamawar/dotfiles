@@ -5,6 +5,7 @@ scan_timeout = 1000
 
 [aws]
 symbol = " "
+disabled = true
 
 [buf]
 symbol = " "

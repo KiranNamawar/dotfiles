@@ -23,6 +23,7 @@ _get_key() {
 }
 
 # 2. Output Renderer (Handles Markdown/Glow)
+
 _render_output() {
     local content="$1"
     printf "\r\033[K" >&2
@@ -32,7 +33,22 @@ _render_output() {
         return 1
     fi
 
-    if command -v glow &> /dev/null && [ -t 1 ]; then
+    # --- PERSISTENCE ---
+    local log_dir="$HOME/.tamatar/logs"
+    mkdir -p "$log_dir"
+    
+    # Attempt to identify caller (zsh specific)
+    local caller="${funcstack[2]}"
+    [ -z "$caller" ] && caller="ai_response"
+    
+    local timestamp=$(date +%Y-%m-%d_%H-%M-%S)
+    local log_file="$log_dir/${timestamp}_${caller}.md"
+    
+    echo "$content" > "$log_file"
+    echo -e "\033[2m(Saved to $log_file)\033[0m" >&2
+    # -------------------
+
+    if command -v glow &> /dev/null && [[ -t 1 ]]; then
         printf '%s\n' "$content" | glow -p -
     else
         printf '%s\n' "$content"
@@ -799,6 +815,7 @@ jsql() {
 
     if [ -z "$user_prompt" ]; then echo "Usage: jsql [-d database] 'query description'"; return 1; fi
     
+
     echo "🧠 Reading schema from '$target_db'..." >&2
     
     local query="SELECT CONCAT(TABLE_NAME, ' (', GROUP_CONCAT(COLUMN_NAME SEPARATOR ', '), ')') 
@@ -1100,4 +1117,66 @@ ai() {
     if [[ -n "$selected" ]]; then
         print -z "$selected "
     fi
+}
+
+# ------------------------------------------
+# NAME: ailog
+# DESC: AI Log Viewer - Browse past AI responses
+# USAGE: ailog [ls|last]
+# TAGS: log, history, ai, view
+# ------------------------------------------
+ailog() {
+    local cmd="${1:-last}"
+    local log_dir="$HOME/.tamatar/logs"
+    
+    if [ ! -d "$log_dir" ]; then
+        echo "❌ No logs found at $log_dir"
+        return 1
+    fi
+
+    case "$cmd" in
+        ls|list)
+            local selected=$(ls -t "$log_dir" | fzf \
+                --height=60% \
+                --layout=reverse \
+                --border \
+                --header="📜 AI Session Logs" \
+                --preview "cat $log_dir/{}" \
+                --preview-window="right:60%:wrap")
+            
+            if [ -n "$selected" ]; then
+                if command -v glow &> /dev/null; then
+                    glow -p "$log_dir/$selected"
+                else
+                    cat "$log_dir/$selected" | ${PAGER:-less -R}
+                fi
+            fi
+            ;;
+            
+        last|latest)
+            local last_file=$(ls -t "$log_dir" | head -n 1)
+            if [ -z "$last_file" ]; then
+                echo "📭 No logs yet." >&2
+                return
+            fi
+            
+            # Check if stdout is a TTY (Interactive)
+            if [[ -t 1 ]]; then
+                echo "📜 Opening $last_file..." >&2
+                if command -v glow &> /dev/null; then
+                    glow -p "$log_dir/$last_file"
+                else
+                    cat "$log_dir/$last_file" | ${PAGER:-less -R}
+                fi
+            else
+                # Pipe/Redirect mode: Clean output only
+                # echo "DEBUG: Redirection detected." >&2
+                cat "$log_dir/$last_file"
+            fi
+            ;;
+            
+        *)
+            echo "Usage: ailog {ls | last}"
+            ;;
+    esac
 }
