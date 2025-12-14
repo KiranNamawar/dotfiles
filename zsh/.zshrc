@@ -88,10 +88,10 @@ eval "$(atuin init zsh)"
 bindkey '^r' atuin-search
 
 # Keybindings
-stty -ixon
-bindkey '^s' fzf-history-widget
-bindkey '^[[A' up-line-or-search
-bindkey '^[OA' up-line-or-search
+# stty -ixon
+# bindkey '^s' fzf-history-widget
+# bindkey '^[[A' up-line-or-search
+# bindkey '^[OA' up-line-or-search
 
 # Bun
 export BUN_INSTALL="$HOME/.bun"

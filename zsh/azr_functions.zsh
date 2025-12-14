@@ -39,7 +39,7 @@ _az_check() {
 # ------------------------------------------
 # NAME: silo
 # DESC: PostgreSQL - General purpose bulk storage
-# USAGE: silo [sql|backup|restore]
+# USAGE: silo [sql|backup|restore|reset]
 # TAGS: db, postgres, sql, azure
 # ------------------------------------------
 silo() {
@@ -58,14 +58,27 @@ silo() {
 
     if ! command -v psql &> /dev/null; then echo "❌ Error: 'psql' is missing."; return 1; fi
 
-    # Tunnel Logic (Same as before)
+    local CMD="$1"
+
+    if [[ "$CMD" == "reset" || "$CMD" == "kill" ]]; then
+        local PID=$(lsof -ti :$LOCAL_PORT)
+        if [ -n "$PID" ]; then
+            echo "🔪 Killing tunnel on port $LOCAL_PORT (PID: $PID)..."
+            kill -9 $PID
+            echo "✅ Tunnel closed."
+        else
+            echo "💤 No active tunnel found on port $LOCAL_PORT."
+        fi
+        return
+    fi
+
+    # Tunnel Logic
     if ! lsof -i :$LOCAL_PORT &>/dev/null; then
         echo "🚇 Opening tunnel via $SSH_HOST..."
         ssh -f -N -L $LOCAL_PORT:$DB_HOST:5432 $SSH_USER@$SSH_HOST
         sleep 1
     fi
 
-    local CMD="$1"
     export PGPASSWORD="$SILO_PASS"
 
     case "$CMD" in
@@ -297,19 +310,19 @@ oops() {
 # TAGS: project, context, memory, index
 # ------------------------------------------
 load-env() {
-    if [ ! -f .memory ]; then 
+    if [ ! -f .memory ]; then
         echo "❌ No .memory file found in current directory."
         return 1
     fi
-    
+
     local PROJ=$(basename "$PWD")
     local RAW_CONTENT=$(cat .memory)
-    
+
     # 1. Prepare Text for Embedding (Needs to be plain text)
     local FULL_TEXT="Project '$PROJ' Context: $RAW_CONTENT"
-    
+
     echo "🏗️  Indexing Project Context: $PROJ..."
-    
+
     memory add "$FULL_TEXT" "Dev: $PROJ"
 }
 
@@ -329,7 +342,7 @@ say() {
 
     # 1. CLEANUP: Strip ANSI Colors first, then Markdown
     local CLEAN_TEXT=""
-    
+
     # Strip ANSI colors (The \e[...] stuff)
     local NO_COLOR=$(echo "$TEXT" | perl -pe 's/\e\[?.*?[\@-~]//g')
 
@@ -379,15 +392,9 @@ hey() {
             echo "🤔 running '$1'..."
             output=$("$@")
         else
-            # case b: ask ai (the upgrade)
-            # try 'rask' (memory) first, fallback to 'ask' (generic)
-            if command -v rask &>/dev/null; then
-                # echo "🤔 rasking..."
-                output=$(rask "$*")
-            else
-                echo "🤔 asking..."
-                output=$(ask "$*")
-            fi
+            # case b: ask ai
+            echo "🤔 asking..."
+            output=$(ask "$*")
         fi
     elif [ ! -t 0 ]; then
         # case c: piped input (e.g., cat file | hey)

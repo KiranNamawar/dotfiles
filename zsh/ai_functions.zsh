@@ -48,7 +48,7 @@ _render_output() {
     echo -e "\033[2m(Saved to $log_file)\033[0m" >&2
     # -------------------
 
-    if command -v glow &> /dev/null && [[ -t 1 ]]; then
+    if command -v glow &> /dev/null && [ -t 1 ]; then
         printf '%s\n' "$content" | glow -p -
     else
         printf '%s\n' "$content"
@@ -168,23 +168,38 @@ _get_embedding() {
 }
 
 # ------------------------------------------
-# AstraDB API Caller (Global Helper)
+# Silo Memory Helper (Postgres Vector DB)
 # ------------------------------------------
-_astra_req() {
-    local endpoint="$1"
-    local payload="$2"
-    local API=$(_get_key "ASTRA_API_ENDPOINT")
-    local TOKEN=$(_get_key "ASTRA_DB_TOKEN")
-
-    if [[ -z "$API" || -z "$TOKEN" ]]; then
-        echo "❌ Error: Astra credentials missing." >&2
+_silo_mem() {
+    local sql="$1"
+    local SILO_PASS=$(_get_key "SILO_PASS" "SILO_PASS")
+    
+    # Fallback: Load from Azure secrets file (matching silo function)
+    if [ -z "$SILO_PASS" ] && [ -f ~/.azure/.secrets.sh ]; then
+        source ~/.azure/.secrets.sh
+    fi
+    
+    if [ -z "$SILO_PASS" ]; then
+        echo "❌ Error: SILO_PASS missing in vault." >&2
         return 1
     fi
-
-    curl -s --max-time 30 --connect-timeout 5 -X POST "$API/api/json/v1/default_keyspace/$endpoint" \
-        -H "Token: $TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "$payload"
+    
+    # Connection config (matching silo function)
+    local SSH_USER="kiran"
+    local SSH_HOST="station"
+    local LOCAL_PORT="6543"
+    local DB_HOST="silo.postgres.database.azure.com"
+    local DB_USER="adminuser"
+    local DB_NAME="memory"
+    
+    # Ensure SSH tunnel is open
+    if ! lsof -i :$LOCAL_PORT &>/dev/null; then
+        ssh -f -N -L $LOCAL_PORT:$DB_HOST:5432 $SSH_USER@$SSH_HOST 2>/dev/null
+        sleep 1
+    fi
+    
+    # Execute query
+    PGPASSWORD="$SILO_PASS" psql -h localhost -p $LOCAL_PORT -U "$DB_USER" -d "$DB_NAME" -t -A -c "$sql" 2>&1
 }
 
 # ------------------------------------------
@@ -264,27 +279,18 @@ except Exception:
 
 # ------------------------------------------
 # NAME: memory
-# DESC: AstraDB Vector Client - Massive long-term AI memory
-# USAGE: memory [init|add|search]
-# TAGS: memory, vector, astra, db
+# DESC: Postgres Vector Memory - Massive long-term AI memory
+# USAGE: memory [init|add|search|ls|clean]
+# TAGS: memory, vector, postgres, silo, pgvector
 # ------------------------------------------
 memory() {
-    # 1. Load Secrets (Check only)
-    local API=$(_get_key "ASTRA_API_ENDPOINT")
-    local TOKEN=$(_get_key "ASTRA_DB_TOKEN")
-    
-    if [[ -z "$API" || -z "$TOKEN" ]]; then
-        echo "❌ Error: Astra credentials missing in Vault."
-        return 1
-    fi
-
     local CMD="$1"
     local ARG2="$2"
     local ARG3="$3"
 
-    # Default to interactive if no args, OR search if arg1 is not a command
+    # Default to interactive if no args
     if [[ -z "$CMD" ]]; then
-        echo "🧠 Tamatar Memory Console (AstraDB)"
+        echo "🧠 Tamatar Memory Console (Postgres/pgvector)"
         echo "   Type 'help' for commands, 'exit' to quit."
         
         local line
@@ -301,66 +307,72 @@ memory() {
 
     case "$CMD" in
         init)
-            echo "⚙️  Initializing architecture..."
-            echo "📚 Creating 'library'..."
-            _astra_req "" '{"createCollection": {"name": "library", "options": {"vector": {"dimension": 768, "metric": "cosine"}}}}' | jq -r '.status // .errors'
-            echo "🌊 Creating 'stream'..."
-            _astra_req "" '{"createCollection": {"name": "stream", "options": {"vector": {"dimension": 768, "metric": "cosine"}}}}' | jq -r '.status // .errors'
-            echo "✅ Done."
+            echo "⚙️  Initializing Postgres Vector Memory..."
+            echo "📦 Enabling pgvector extension..."
+            _silo_mem "CREATE EXTENSION IF NOT EXISTS vector;"
+            
+            echo "📚 Creating memory table..."
+            _silo_mem "CREATE TABLE IF NOT EXISTS items (
+                id SERIAL PRIMARY KEY,
+                content TEXT NOT NULL,
+                source VARCHAR(255),
+                embedding vector(768),
+                created_at TIMESTAMP DEFAULT NOW()
+            );"
+            
+            echo "🚀 Creating HNSW index for fast search..."
+            _silo_mem "CREATE INDEX IF NOT EXISTS items_embedding_idx ON items USING hnsw (embedding vector_cosine_ops);"
+            
+            echo "✅ Memory initialized!"
             ;;
 
         add|save)
-            if [ -z "$ARG2" ]; then echo "Usage: add <text> [source]"; return 1; fi
+            if [ -z "$ARG2" ]; then echo "Usage: memory add <text> [source]"; return 1; fi
             local CONTENT="$ARG2"
             local SOURCE="${ARG3:-manual}"
             
-            echo -n "🧠 Embedding..."
+            echo -n "🧠 Embedding..." >&2
             local VECTOR=$(_get_embedding "$CONTENT")
-            if [[ -z "$VECTOR" ]]; then echo "❌ Embedding failed."; return 1; fi
+            if [[ -z "$VECTOR" || "$VECTOR" == "null" ]]; then 
+                echo " ❌ Embedding failed." >&2
+                return 1
+            fi
             
-            echo -n " 💾 Storing..."
-            local JSON=$(jq -n \
-                --arg txt "$CONTENT" \
-                --arg src "$SOURCE" \
-                --argjson vec "$VECTOR" \
-                --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                '{
-                   insertOne: {
-                     document: {
-                       content: $txt, 
-                       "$vector": $vec, 
-                       metadata: { source: $src },
-                       created_at: $ts
-                     }
-                   }
-                 }')
+            echo -n " 💾 Storing..." >&2
             
-            local OUT=$(_astra_req "library" "$JSON")
-            if echo "$OUT" | grep -q "insertedIds"; then echo " ✅ Saved."; else echo " ❌ Failed: $OUT"; fi
+            # Escape single quotes for SQL
+            local SAFE_CONTENT="${CONTENT//\'/\'\'}" 
+            local SAFE_SOURCE="${SOURCE//\'/\'\'}" 
+            
+            local SQL="INSERT INTO items (content, source, embedding) VALUES ('$SAFE_CONTENT', '$SAFE_SOURCE', '$VECTOR');"
+            
+            if _silo_mem "$SQL" 2>&1 | grep -qi "INSERT"; then
+                echo " ✅ Saved." >&2
+            else
+                echo " ❌ Failed." >&2
+                return 1
+            fi
             ;;
 
         ls|list|log)
             echo "🔍 Recent Memories:"
-            # Astra doesn't support simple "last 10" easily without vector sort, but we can try find with limit
-            local JSON='{"find": {"options": {"limit": 10}, "projection": {"content": 1, "metadata": 1, "created_at": 1}}}'
-            local RESPONSE=$(_astra_req "library" "$JSON")
-            if ! echo "$RESPONSE" | jq -e . >/dev/null 2>&1; then
-                echo "❌ Error: Database returned invalid JSON (Corrupt memory?)"
-                echo "💡 Suggestion: Run 'memory clean' to wipe bad data."
-                return 1
+            local RESULT=$(_silo_mem "SELECT id, created_at, source, LEFT(content, 60) as preview FROM items ORDER BY created_at DESC LIMIT 10;")
+            
+            if [[ -z "$RESULT" ]]; then
+                echo "📭 No memories found."
+            else
+                echo "$RESULT" | while IFS='|' read -r id timestamp src preview; do
+                    echo "👉 [$id] $timestamp [$src]"
+                    echo "   $preview..."
+                done
             fi
-            echo "$RESPONSE" | jq -r '.data.documents[] | "👉 \(.created_at // "N/A") [\(.metadata.source // "manual")]\n   \(.content | .[0:60])..."'
             ;;
 
         clean|wipe)
-            echo -n "⚠️  DANGER: Wipe ALL memory (AstraDB)? [y/N] "
+            echo -n "⚠️  DANGER: Wipe ALL memory (Postgres)? [y/N] "
             read -r confirm
             if [[ "$confirm" == "y" ]]; then
-                 # Drop and recreate is often cleaner for "wipe" in NoSQL
-                 _astra_req "" '{"deleteCollection": {"name": "library"}}'
-                 echo "⏳ Waiting for cleanup..."
-                 sleep 2
-                 _astra_req "" '{"createCollection": {"name": "library", "options": {"vector": {"dimension": 768, "metric": "cosine"}}}}'
+                _silo_mem "TRUNCATE TABLE items;"
                 echo "🧹 Memory wiped clean."
             else
                 echo "❌ Aborted."
@@ -368,31 +380,41 @@ memory() {
             ;;
 
         ask|search|memory)
-            if [ -z "$ARG2" ]; then echo "Usage: search <query>"; return 1; fi
+            if [ -z "$ARG2" ]; then echo "Usage: memory search <query>"; return 1; fi
             
             echo -n "🤔 Thinking..." >&2
             local Q_VEC=$(_get_embedding "$ARG2")
             
-            echo -e "\r🔍 \033[1;33mResults:\033[0m" >&2
-            
-            local JSON=$(jq -n \
-                --argjson vec "$Q_VEC" \
-                '{"find": {"sort": {"$vector": $vec}, "options": {"limit": 5, "includeSimilarity": true}, "projection": {"content": 1, "metadata": 1}}}')
-            
-            local RESPONSE=$(_astra_req "library" "$JSON")
-            
-            if echo "$RESPONSE" | grep -q "errors"; then
-                echo "❌ API Error:"
-                echo "$RESPONSE" | jq .
+            if [[ -z "$Q_VEC" || "$Q_VEC" == "null" ]]; then
+                echo " ❌ Embedding failed." >&2
                 return 1
             fi
             
-            local COUNT=$(echo "$RESPONSE" | jq -r '.data.documents | length' 2>/dev/null)
+            echo -e "\r🔍 \033[1;33mResults:\033[0m" >&2
             
-            if [[ "$COUNT" == "0" || -z "$COUNT" || "$COUNT" == "null" ]]; then
-                 echo "📭 No memories found."
+            # pgvector cosine similarity: <=> operator (lower is more similar)
+            # We use 1 - distance to get similarity score
+            local SQL="SELECT 
+                content,
+                source,
+                1 - (embedding <=> '$Q_VEC') as similarity
+            FROM items
+            ORDER BY embedding <=> '$Q_VEC'
+            LIMIT 5;"
+            
+            local RESULT=$(_silo_mem "$SQL" 2>&1)
+            
+            if [[ -z "$RESULT" ]]; then
+                echo "📭 No memories found."
             else
-                 echo "$RESPONSE" | jq -r '.data.documents[] | "\n👉 Match: \(.["$similarity"] | . * 100 | floor)%\n   Source: \(.metadata.source)\n   \(.content)"'
+                echo "$RESULT" | while IFS='|' read -r content src similarity; do
+                    # Convert similarity to percentage
+                    local pct=$(echo "$similarity * 100" | bc | cut -d. -f1)
+                    echo ""
+                    echo "👉 Match: ${pct}%"
+                    echo "   Source: $src"
+                    echo "   $content"
+                done
             fi
             ;;
             
