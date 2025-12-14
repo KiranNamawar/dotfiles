@@ -1,17 +1,21 @@
 # --- Fonts ---
 font_family      FiraCode Nerd Font
-font_size        12.0
+font_size        13.0
 # Enable ligatures (e.g., => turns into a single arrow)
 disable_ligatures never
 
 # --- Window Layout ---
-window_padding_width 4
+window_padding_width 6
 hide_window_decorations yes
 remember_window_size  no
-initial_window_width  1000
-initial_window_height 650
+initial_window_width  1200
+initial_window_height 800
 # specific to Fedora/Gnome to force the titlebar off if it persists
 linux_display_server auto
+
+# 2. Opacity: Make it slightly see-through (0.9 is safe, 0.8 is cool)
+background_opacity 0.95
+dynamic_background_opacity yes
 
 # --- Tab Bar ---
 tab_bar_style powerline
@@ -23,3 +27,6 @@ cursor_blink_interval 0
 
 # --- Bell ---
 enable_audio_bell no
+
+# fullscreen remap
+# map super+f toggle_fullscreen
